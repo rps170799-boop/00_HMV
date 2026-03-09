@@ -11,25 +11,29 @@ namespace HMVTools
         public Result OnStartup(UIControlledApplication app)
         {
             app.CreateRibbonTab("HMV Tools");
-
-            RibbonPanel panelDwg = app.CreateRibbonPanel("HMV Tools", "DWG");
             string path = Assembly.GetExecutingAssembly().Location;
 
-            PushButtonData btnData = new PushButtonData(
-                "DwgToLines",
-                "DWG to\nLines",
+            // DWG Panel - single button
+            RibbonPanel panelDwg = app.CreateRibbonPanel("HMV Tools", "DWG");
+
+            PushButtonData btnConvert = new PushButtonData(
+                "DwgConvert",
+                "DWG\nConvert",
                 path,
-                "HMVTools.DwgToLinesCommand");
+                "HMVTools.DwgConvertCommand");
+            btnConvert.ToolTip = "Convert DWG lines and texts to HMV standards";
+            btnConvert.LongDescription =
+                "Step 1 – Convert Lines: extracts geometry from the DWG import "
+                + "and creates HMV_LINEA detail lines.\n"
+                + "Step 2 – Partial Explode the DWG manually in Revit.\n"
+                + "Step 3 – Standardize All: re-styles exploded lines to HMV_LINEA, "
+                + "converts texts to HMV_General_<size> <font>, and purges "
+                + "unused DWG-imported styles from the project.";
 
-            PushButton btn = panelDwg.AddItem(btnData) as PushButton;
-            btn.ToolTip = "Convert DWG lines to standardized Revit detail lines";
-            btn.LongDescription = "Reads line weights and patterns from an imported DWG "
-                + "and creates HMV-standardized detail lines with matching line styles.";
+            PushButton btn = panelDwg.AddItem(btnConvert) as PushButton;
 
-            // Load icon if available
             BitmapImage icon = LoadImage("HMVTools.Resources.dwg_32.png");
-            if (icon != null)
-                btn.LargeImage = icon;
+            if (icon != null) btn.LargeImage = icon;
 
             return Result.Succeeded;
         }
@@ -46,17 +50,13 @@ namespace HMVTools
                 Stream stream = Assembly.GetExecutingAssembly()
                     .GetManifestResourceStream(resourceName);
                 if (stream == null) return null;
-
                 BitmapImage image = new BitmapImage();
                 image.BeginInit();
                 image.StreamSource = stream;
                 image.EndInit();
                 return image;
             }
-            catch
-            {
-                return null;
-            }
+            catch { return null; }
         }
     }
 }
