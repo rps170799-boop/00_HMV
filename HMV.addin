@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+	<AddIn Type="Application">
+		<Name>HMV Tools</Name>
+		<Assembly>C:\Users\rpserna\AppData\Roaming\Autodesk\Revit\Addins\2023\00_HMV\00_HMV.dll</Assembly>
+		<FullClassName>HMVTools.App</FullClassName>
+		<AddInId>AFB4FD3C-02BD-48A1-A94B-84E5C090CD06</AddInId>
+		<VendorId>HMV</VendorId>
+	</AddIn>
+</RevitAddIns>
