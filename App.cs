@@ -55,8 +55,8 @@ namespace HMVTools
             BitmapImage iconDuctos = LoadImage("HMVTools.Resources.ductos_32.png");
             if (iconDuctos != null) btnD.LargeImage = iconDuctos;
 
-            // ── Topography Panel ──
-            RibbonPanel panelTopo = app.CreateRibbonPanel("HMV Tools", "Topography");
+            // ── Annotation Tools Panel ──
+            RibbonPanel panelAnnot = app.CreateRibbonPanel("HMV Tools", "Annotation Tools");
 
             PushButtonData btnTopoLines = new PushButtonData(
                 "TopoToLines",
@@ -72,9 +72,27 @@ namespace HMVTools
                 + "• Cálculo automático de intersecciones con el plano de vista\n"
                 + "• Creación de líneas de detalle en la vista activa\n"
                 + "• Reporte de líneas creadas y omitidas";
-            PushButton btnTopo = panelTopo.AddItem(btnTopoLines) as PushButton;
+            PushButton btnTopo = panelAnnot.AddItem(btnTopoLines) as PushButton;
             BitmapImage iconTopo = LoadImage("HMVTools.Resources.topo_32.png");
             if (iconTopo != null) btnTopo.LargeImage = iconTopo;
+
+            PushButtonData btnPipeAnnot = new PushButtonData(
+                "PipeandFramingAnnotations",
+                "Pipe, Framing\nAnnotations",
+                path,
+                "HMVTools.PlaceAnnotationsAlongPipeCmd");
+            btnPipeAnnot.ToolTip = "Place annotations along paths";
+            btnPipeAnnot.LongDescription =
+                "Coloca instancias de una familia de anotación genérica a lo largo "
+                + "del recorrido de tuberías (Pipe) , tuberías flexibles (FlexPipe) y tambien vigas (Structural Framing).\n\n"
+                + "Funciones:\n"
+                + "• Selección de Pipes , FlexPipes, y Structural Framing\n"
+                + "• Espaciado configurable entre anotaciones\n"
+                + "• Orientación automática según la tangente del recorrido\n"
+                + "• Funciona con tramos rectos, arcos y splines";
+            PushButton btnPA = panelAnnot.AddItem(btnPipeAnnot) as PushButton;
+            BitmapImage iconPipeAnnot = LoadImage("HMVTools.Resources.pipeannotation_32.png");
+            if (iconPipeAnnot != null) btnPA.LargeImage = iconPipeAnnot;
 
             return Result.Succeeded;
         }
