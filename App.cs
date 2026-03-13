@@ -94,7 +94,6 @@ namespace HMVTools
             BitmapImage iconPipeAnnot = LoadImage("HMVTools.Resources.pipeannotation_32.png");
             if (iconPipeAnnot != null) btnPA.LargeImage = iconPipeAnnot;
 
-            // ── NEW: Grid & Level Extent button ──
             PushButtonData btnGridLevel = new PushButtonData(
                 "GridLevelExtent",
                 "Grid/Level\nExtent",
@@ -112,6 +111,30 @@ namespace HMVTools
             PushButton btnGL = panelAnnot.AddItem(btnGridLevel) as PushButton;
             BitmapImage iconGL = LoadImage("HMVTools.Resources.gridlevel_32.png");
             if (iconGL != null) btnGL.LargeImage = iconGL;
+
+            // ── Audit Panel ──
+            RibbonPanel panelAudit = app.CreateRibbonPanel("HMV Tools", "Audit");
+
+            PushButtonData btnTextAudit = new PushButtonData(
+                "TextAudit",
+                "Text\nAudit",
+                path,
+                "HMVTools.TextAuditCommand");
+            btnTextAudit.ToolTip = "Standardize all text styles and annotation tag families";
+            btnTextAudit.LongDescription =
+                "Ejecuta un proceso completo de estandarización de textos en el proyecto:\n\n"
+                + "Step 1 – Standardize Properties: normaliza Font (Arial), Width (1.0), "
+                + "Bold (No), Background (Opaque) y Size (snap a 1.5/2/2.5/3/3.5 mm) "
+                + "en todos los TextNoteTypes y DimensionTypes.\n\n"
+                + "Step 2 – Merge Types: agrupa TextNoteTypes por tamaño, renombra el "
+                + "keeper a HMV_General_Xmm Arial y reasigna todas las instancias.\n\n"
+                + "Step 3 – Purge: elimina los tipos vacíos que quedaron sin instancias.\n\n"
+                + "Step 4 – Tag Families: abre cada familia de anotación, estandariza "
+                + "las propiedades de texto internas y recarga la familia al proyecto.\n\n"
+                + "Al finalizar muestra un reporte completo de todos los cambios.";
+            PushButton btnTA = panelAudit.AddItem(btnTextAudit) as PushButton;
+            BitmapImage iconTA = LoadImage("HMVTools.Resources.textaudit_32.png");
+            if (iconTA != null) btnTA.LargeImage = iconTA;
 
             return Result.Succeeded;
         }

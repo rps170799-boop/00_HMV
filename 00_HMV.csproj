@@ -80,6 +80,9 @@
     <Compile Include="Pipeannotationwindow.cs" />
     <Compile Include="Placeannotationsalongpipecmd.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Textauditcommand.cs" />
+    <Compile Include="Textauditfamilyloadoptions .cs" />
+    <Compile Include="Textauditreportwindow.cs" />
     <Compile Include="TopographyToLinesCommand.cs" />
     <Compile Include="TopographyToLinesWindow.cs" />
     <Compile Include="Usdtuberiaconfigcommand.cs" />
@@ -94,6 +97,9 @@
     <EmbeddedResource Include="Resources\gridlevel_32.png" />
     <EmbeddedResource Include="Resources\pipeannotation_32.png" />
     <EmbeddedResource Include="Resources\topo_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\textaudit_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
