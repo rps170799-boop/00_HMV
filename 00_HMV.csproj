@@ -75,6 +75,8 @@
     <Compile Include="DwgConvertWindow.cs" />
     <Compile Include="DwgPickerWindow.cs" />
     <Compile Include="DWGToLinesCommand.cs" />
+    <Compile Include="Gridlevelextentcommand.cs" />
+    <Compile Include="Gridlevelextentwindow.cs" />
     <Compile Include="Pipeannotationwindow.cs" />
     <Compile Include="Placeannotationsalongpipecmd.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -87,13 +89,11 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="Resources\topo_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\dwg_32.png" />
-  </ItemGroup>
-  <ItemGroup>
     <EmbeddedResource Include="Resources\ductos_32.png" />
+    <EmbeddedResource Include="Resources\dwg_32.png" />
+    <EmbeddedResource Include="Resources\gridlevel_32.png" />
+    <EmbeddedResource Include="Resources\pipeannotation_32.png" />
+    <EmbeddedResource Include="Resources\topo_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

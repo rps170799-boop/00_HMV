@@ -94,6 +94,25 @@ namespace HMVTools
             BitmapImage iconPipeAnnot = LoadImage("HMVTools.Resources.pipeannotation_32.png");
             if (iconPipeAnnot != null) btnPA.LargeImage = iconPipeAnnot;
 
+            // ── NEW: Grid & Level Extent button ──
+            PushButtonData btnGridLevel = new PushButtonData(
+                "GridLevelExtent",
+                "Grid/Level\nExtent",
+                path,
+                "HMVTools.GridLevelExtentCommand");
+            btnGridLevel.ToolTip = "Switch grids and levels between 2D and 3D extent";
+            btnGridLevel.LongDescription =
+                "Converts grids and levels between 2D (ViewSpecific) and 3D (Model) "
+                + "datum extent across multiple views.\n\n"
+                + "Features:\n"
+                + "• Toggle between 2D (independent per view) and 3D (global)\n"
+                + "• Choose to process Grids, Levels, or both\n"
+                + "• Select individual views or apply to all views at once\n"
+                + "• Summary report of all changes made";
+            PushButton btnGL = panelAnnot.AddItem(btnGridLevel) as PushButton;
+            BitmapImage iconGL = LoadImage("HMVTools.Resources.gridlevel_32.png");
+            if (iconGL != null) btnGL.LargeImage = iconGL;
+
             return Result.Succeeded;
         }
 
