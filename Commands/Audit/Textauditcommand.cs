@@ -611,7 +611,7 @@ namespace HMVTools
             {
                 string famName = f.Name;
 
-                if (famName.Contains("Membrete"))
+                if (famName.Contains("Membrete") || famName.Contains("Pagina Inicio"))
                 {
                     _familiesCompliant++;
                     continue;

@@ -71,21 +71,21 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
-    <Compile Include="DwgConvertCommand.cs" />
-    <Compile Include="DwgConvertWindow.cs" />
-    <Compile Include="DwgPickerWindow.cs" />
-    <Compile Include="DWGToLinesCommand.cs" />
-    <Compile Include="Gridlevelextentcommand.cs" />
-    <Compile Include="Gridlevelextentwindow.cs" />
-    <Compile Include="Pipeannotationwindow.cs" />
-    <Compile Include="Placeannotationsalongpipecmd.cs" />
+    <Compile Include="Commands\DWG\DwgConvertCommand.cs" />
+    <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
+    <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
+    <Compile Include="Commands\DWG\DWGToLinesCommand.cs" />
+    <Compile Include="Commands\Annotation\Gridlevelextentcommand.cs" />
+    <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.cs" />
+    <Compile Include="WindowUI\Annotation\Pipeannotationwindow.cs" />
+    <Compile Include="Commands\Annotation\Placeannotationsalongpipecmd.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Textauditcommand.cs" />
+    <Compile Include="Commands\Audit\Textauditcommand.cs" />
     <Compile Include="Textauditfamilyloadoptions .cs" />
-    <Compile Include="Textauditreportwindow.cs" />
-    <Compile Include="TopographyToLinesCommand.cs" />
-    <Compile Include="TopographyToLinesWindow.cs" />
-    <Compile Include="Usdtuberiaconfigcommand.cs" />
+    <Compile Include="WindowUI\Audit\Textauditreportwindow.cs" />
+    <Compile Include="Commands\Annotation\TopographyToLinesCommand.cs" />
+    <Compile Include="WindowUI\Annotation\TopographyToLinesWindow.cs" />
+    <Compile Include="Commands\FamilyControl\Usdtuberiaconfigcommand.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HMV.addin" />
@@ -100,6 +100,9 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\textaudit_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="WindowUI\FamilyControl\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
