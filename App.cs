@@ -55,6 +55,26 @@ namespace HMVTools
             BitmapImage iconDuctos = LoadImage("HMVTools.Resources.ductos_32.png");
             if (iconDuctos != null) btnD.LargeImage = iconDuctos;
 
+            PushButtonData btnRefreshZ = new PushButtonData(
+                "RefreshZToFloor",
+                "Refresh Z\nto Floor",
+                path,
+                "HMVTools.RefreshZToFloorCommand");
+            btnRefreshZ.ToolTip = "Snap element Z to the top of a linked floor";
+            btnRefreshZ.LongDescription =
+                "Adjusts the Z elevation of selected elements (foundations, etc.) "
+                + "so they sit exactly on top of a floor from a linked Revit model.\n\n"
+                + "Workflow:\n"
+                + "1. Move elements to their new X,Y position.\n"
+                + "2. Select the moved elements (or pre-select before running).\n"
+                + "3. Run this command and pick the Revit link with the floor.\n"
+                + "4. The tool shoots a vertical ray at each element's X,Y and "
+                + "snaps its Z to the top face of the nearest linked floor.\n\n"
+                + "Works with any point-based element (foundations, equipment, etc.).";
+            PushButton btnRZ = panelFamily.AddItem(btnRefreshZ) as PushButton;
+            BitmapImage iconRZ = LoadImage("HMVTools.Resources.refreshz_32.png");
+            if (iconRZ != null) btnRZ.LargeImage = iconRZ;
+
             // ── Annotation Tools Panel ──
             RibbonPanel panelAnnot = app.CreateRibbonPanel("HMV Tools", "Annotation Tools");
 
@@ -112,6 +132,25 @@ namespace HMVTools
             BitmapImage iconGL = LoadImage("HMVTools.Resources.gridlevel_32.png");
             if (iconGL != null) btnGL.LargeImage = iconGL;
 
+            PushButtonData btnSpotElev = new PushButtonData(
+             "SpotElevOnFloor",
+             "Spot Elev\non Floor",
+              path,
+            "HMVTools.SpotElevationCommand");
+            btnSpotElev.ToolTip = "Place spot elevations on linked floor at foundation centers";
+            btnSpotElev.LongDescription =
+                "Places a Spot Elevation annotation at each selected foundation's center XY "
+                + "position, reading the Z from the top face of a floor in a linked model.\n\n"
+                + "Workflow:\n"
+                + "1. Choose foundation source (active model or a link) and floor link.\n"
+                + "2. Pick foundations in the canvas.\n"
+                + "3. The tool ray-casts to the linked floor's top face and places "
+                + "spot elevations with leaders.";
+            PushButton btnSE = panelAnnot.AddItem(btnSpotElev) as PushButton;
+            BitmapImage iconSE = LoadImage("HMVTools.Resources.spotelev_32.png");
+            if (iconSE != null) btnSE.LargeImage = iconSE;
+
+
             // ── Audit Panel ──
             RibbonPanel panelAudit = app.CreateRibbonPanel("HMV Tools", "Audit");
 
@@ -135,6 +174,25 @@ namespace HMVTools
             PushButton btnTA = panelAudit.AddItem(btnTextAudit) as PushButton;
             BitmapImage iconTA = LoadImage("HMVTools.Resources.textaudit_32.png");
             if (iconTA != null) btnTA.LargeImage = iconTA;
+
+            PushButtonData btnViewAudit = new PushButtonData(
+            "ViewAudit",
+            "View\nAudit",
+            path,
+            "HMVTools.ViewAuditCommand");
+            btnViewAudit.ToolTip = "Audit and rename views placed on sheets";
+            btnViewAudit.LongDescription =
+                "Displays an interactive table of all views placed on sheets:\n\n"
+                + "• View type, original name, editable new name, sheet(s)\n"
+                + "• Bulk prefix addition to selected views\n"
+                + "• Duplicate name detection (red highlight)\n"
+                + "• Conflicting views are skipped when applying changes";
+            PushButton btnVA = panelAudit.AddItem(btnViewAudit) as PushButton;
+            BitmapImage iconVA = LoadImage("HMVTools.Resources.viewaudit_32.png");
+            if (iconVA != null) btnVA.LargeImage = iconVA;
+
+
+
 
             return Result.Succeeded;
         }

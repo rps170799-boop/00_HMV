@@ -71,7 +71,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
+    <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
+    <Compile Include="Commands\Audit\Viewauditcommand.cs" />
     <Compile Include="Commands\DWG\DwgConvertCommand.cs" />
+    <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
+    <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
+    <Compile Include="WindowUI\Audit\Viewauditwindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
     <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
     <Compile Include="Commands\DWG\DWGToLinesCommand.cs" />
@@ -86,6 +91,7 @@
     <Compile Include="Commands\Annotation\TopographyToLinesCommand.cs" />
     <Compile Include="WindowUI\Annotation\TopographyToLinesWindow.cs" />
     <Compile Include="Commands\FamilyControl\Usdtuberiaconfigcommand.cs" />
+    <Compile Include="WindowUI\FamilyControl\Refreshztofloorwindow.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="HMV.addin" />
@@ -101,8 +107,12 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\textaudit_32.png" />
   </ItemGroup>
+  <ItemGroup />
   <ItemGroup>
-    <Folder Include="WindowUI\FamilyControl\" />
+    <EmbeddedResource Include="Resources\refreshz_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\spotelev_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
