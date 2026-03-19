@@ -222,6 +222,16 @@ namespace HMVTools
 
                     if (hmvStandard)
                     {
+                        // ── Compute NAP bend/end first (base position) ──
+                        XYZ napBend = new XYZ(
+                            napPoint.X + offX,
+                            napPoint.Y + offY,
+                            napPoint.Z);
+                        XYZ napEnd = new XYZ(
+                            napBend.X + offX * 0.5,
+                            napBend.Y,
+                            napBend.Z);
+
                         // ── NTCE: highest face on element ───────
                         var ntceHit = FindHighestFaceOnElement(
                             elemRI, fd.BBoxMin, fd.BBoxMax,
@@ -239,22 +249,21 @@ namespace HMVTools
                                     hostCenter.X, hostCenter.Y, topZ);
                             }
 
-                            // NTCE: create WITH leader at same position
-                            // as NAP, then disable leader. Text stays at
-                            // its positioned location above the shoulder.
+                            // NTCE bend/end use NAP's X,Y so both
+                            // shoulder lines overlap in plan view.
+                            // NTCE type has text Above Leader,
+                            // NAP type has text Below Leader → stacked.
                             XYZ ntceBend = new XYZ(
-                                ntcePoint.X + offX,
-                                ntcePoint.Y + offY,
+                                napBend.X,
+                                napBend.Y,
                                 ntcePoint.Z);
                             XYZ ntceEnd = new XYZ(
-                                ntceBend.X + offX * 0.5,
-                                ntceBend.Y,
-                                ntceBend.Z);
+                                napEnd.X,
+                                napEnd.Y,
+                                ntcePoint.Z);
 
                             try
                             {
-                                // Create with leader ON (white = invisible)
-                                // Same bend/end as NAP for alignment
                                 SpotDimension spotNtce =
                                     doc.Create.NewSpotElevation(
                                         view, ntceRef,
@@ -280,16 +289,6 @@ namespace HMVTools
                         }
 
                         // ── NAP: leader ON, text Below Leader ────────
-                        // Same bend offset → shoulder lines overlap,
-                        // NTCE text Above + NAP text Below = stacked
-                        XYZ napBend = new XYZ(
-                            napPoint.X + offX,
-                            napPoint.Y + offY,
-                            napPoint.Z);
-                        XYZ napEnd = new XYZ(
-                            napBend.X + offX * 0.5,
-                            napBend.Y,
-                            napBend.Z);
 
                         try
                         {
