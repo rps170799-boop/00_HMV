@@ -72,10 +72,12 @@
   <ItemGroup>
     <Compile Include="App.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
+    <Compile Include="Commands\Audit\Sheetauditcommand.cs" />
     <Compile Include="Commands\Audit\Viewauditcommand.cs" />
     <Compile Include="Commands\DWG\DwgConvertCommand.cs" />
     <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
     <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
+    <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
     <Compile Include="WindowUI\Audit\Viewauditwindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
     <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
@@ -107,12 +109,17 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\textaudit_32.png" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\viewaudit_32.png" />
+  </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\refreshz_32.png" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\spotelev_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\sheetaudit_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Globalization;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -19,11 +18,26 @@ namespace HMVTools
 {
     // ── Data class (plain, no Revit references) ────────────────
 
-    public class ViewAuditEntry : INotifyPropertyChanged
+    public class SheetAuditEntry : INotifyPropertyChanged
     {
         public int ElementId { get; set; }
-        public string ViewType { get; set; }
+        public string OriginalNumber { get; set; }
         public string OriginalName { get; set; }
+
+        private string _newNumber;
+        public string NewNumber
+        {
+            get => _newNumber;
+            set
+            {
+                if (_newNumber != value)
+                {
+                    _newNumber = value;
+                    OnPropertyChanged(nameof(NewNumber));
+                    OnPropertyChanged(nameof(NumberChanged));
+                }
+            }
+        }
 
         private string _newName;
         public string NewName
@@ -40,8 +54,7 @@ namespace HMVTools
             }
         }
 
-        public string Sheets { get; set; }
-        public int SheetCount { get; set; }
+        public int ViewCount { get; set; }
 
         private bool _isSelected;
         public bool IsSelected
@@ -50,14 +63,16 @@ namespace HMVTools
             set { _isSelected = value; OnPropertyChanged(nameof(IsSelected)); }
         }
 
-        private bool _hasConflict;
-        public bool HasConflict
+        private bool _hasNumberConflict;
+        public bool HasNumberConflict
         {
-            get => _hasConflict;
-            set { _hasConflict = value; OnPropertyChanged(nameof(HasConflict)); }
+            get => _hasNumberConflict;
+            set { _hasNumberConflict = value; OnPropertyChanged(nameof(HasNumberConflict)); }
         }
 
+        public bool NumberChanged => NewNumber != OriginalNumber;
         public bool NameChanged => NewName != OriginalName;
+        public bool AnyChanged => NumberChanged || NameChanged;
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged(string name) =>
@@ -66,9 +81,9 @@ namespace HMVTools
 
     // ── Window ─────────────────────────────────────────────────
 
-    public class ViewAuditWindow : Window
+    public class SheetAuditWindow : Window
     {
-        // Colors (matching HMV Tools palette)
+        // Colors
         private static readonly Color BluePrimary = Color.FromRgb(0, 120, 212);
         private static readonly Color GrayBg = Color.FromRgb(240, 240, 243);
         private static readonly Color DarkText = Color.FromRgb(30, 30, 30);
@@ -81,39 +96,43 @@ namespace HMVTools
         // Controls
         private DataGrid dataGrid;
         private TextBox searchBox;
-        private TextBox prefixBox;
-        private TextBox cutBox;
+        private TextBox prefixNumBox;
+        private TextBox prefixNameBox;
+        private TextBox cutNumBox;
+        private TextBox cutNameBox;
         private TextBlock summaryText;
         private CheckBox selectAllCheckBox;
 
         // Data
-        private ObservableCollection<ViewAuditEntry> allEntries;
+        private ObservableCollection<SheetAuditEntry> allEntries;
         private ICollectionView collectionView;
-        private HashSet<string> externalViewTypeNames;
+        private HashSet<string> externalSheetNumbers;
 
-        // Flag to prevent recursive checkbox updates
         private bool _suppressCheckSync;
 
         /// <summary>Filled when user clicks Apply. Null if cancelled.</summary>
-        public List<ViewAuditEntry> Results { get; private set; }
+        public List<SheetAuditEntry> Results { get; private set; }
 
-        /// <param name="entries">Views placed on sheets.</param>
-        /// <param name="allProjectViewTypeNames">
-        /// Every "ViewType\0ViewName" key in the project, for conflict detection.
+        /// <param name="entries">All sheets in the project.</param>
+        /// <param name="allProjectSheetNumbers">
+        /// Every sheet number in the project (for duplicate detection).
         /// </param>
-        public ViewAuditWindow(
-            List<ViewAuditEntry> entries,
-            HashSet<string> allProjectViewTypeNames)
+        public SheetAuditWindow(
+            List<SheetAuditEntry> entries,
+            HashSet<string> allProjectSheetNumbers)
         {
-            externalViewTypeNames = allProjectViewTypeNames;
+            // External = numbers NOT in our table
+            var tableNumbers = new HashSet<string>(
+                entries.Select(e => e.OriginalNumber));
+            externalSheetNumbers = new HashSet<string>(
+                allProjectSheetNumbers.Where(n => !tableNumbers.Contains(n)));
 
-            allEntries = new ObservableCollection<ViewAuditEntry>(entries);
+            allEntries = new ObservableCollection<SheetAuditEntry>(entries);
 
-            // Subscribe to each entry for live conflict detection
             foreach (var entry in allEntries)
                 entry.PropertyChanged += Entry_PropertyChanged;
 
-            Title = "HMV Tools \u2013 View Audit";
+            Title = "HMV Tools \u2013 Sheet Audit";
             Width = 960;
             Height = 680;
             MinWidth = 780;
@@ -126,13 +145,13 @@ namespace HMVTools
             mainGrid.RowDefinitions.Add(Row(GridLength.Auto));   // 0 Title
             mainGrid.RowDefinitions.Add(Row(GridLength.Auto));   // 1 Search + summary
             mainGrid.RowDefinitions.Add(Row(Star()));            // 2 DataGrid
-            mainGrid.RowDefinitions.Add(Row(GridLength.Auto));   // 3 Prefix / Cut row
+            mainGrid.RowDefinitions.Add(Row(GridLength.Auto));   // 3 Tools
             mainGrid.RowDefinitions.Add(Row(GridLength.Auto));   // 4 Buttons
 
             // ── Row 0: Title ───────────────────────────────────
             var title = new TextBlock
             {
-                Text = "View Audit \u2013 Sheets",
+                Text = "Sheet Audit",
                 FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(DarkText),
@@ -141,7 +160,7 @@ namespace HMVTools
             Grid.SetRow(title, 0);
             mainGrid.Children.Add(title);
 
-            // ── Row 1: Search bar + summary ────────────────────
+            // ── Row 1: Search + summary ────────────────────────
             var topRow = new Grid { Margin = new Thickness(0, 0, 0, 8) };
             topRow.ColumnDefinitions.Add(
                 new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -203,12 +222,12 @@ namespace HMVTools
             Grid.SetRow(gridBorder, 2);
             mainGrid.Children.Add(gridBorder);
 
-            // ── Row 3: Prefix + Cut row ────────────────────────
+            // ── Row 3: Tools ───────────────────────────────────
             var toolRow = BuildToolRow();
             Grid.SetRow(toolRow, 3);
             mainGrid.Children.Add(toolRow);
 
-            // ── Row 4: Action buttons ──────────────────────────
+            // ── Row 4: Buttons ─────────────────────────────────
             var buttonPanel = BuildButtonRow();
             Grid.SetRow(buttonPanel, 4);
             mainGrid.Children.Add(buttonPanel);
@@ -221,7 +240,7 @@ namespace HMVTools
             Loaded += (s, e) => searchBox.Focus();
         }
 
-        // ── DataGrid setup ─────────────────────────────────────
+        // ── DataGrid ───────────────────────────────────────────
 
         private DataGrid BuildDataGrid()
         {
@@ -271,13 +290,10 @@ namespace HMVTools
                 new Thickness(0, 0, 1, 1)));
             dg.ColumnHeaderStyle = headerStyle;
 
-            // ── Column 0: Checkbox ─────────────────────────────
+            // ── Checkbox column ────────────────────────────────
             var chkCol = new DataGridTemplateColumn
-            {
-                Width = new DataGridLength(36)
-            };
+            { Width = new DataGridLength(36) };
 
-            // Header: Select-all checkbox (starts unchecked)
             selectAllCheckBox = new CheckBox
             {
                 IsChecked = false,
@@ -288,7 +304,6 @@ namespace HMVTools
             selectAllCheckBox.Unchecked += SelectAll_Changed;
             chkCol.Header = selectAllCheckBox;
 
-            // Cell: per-row checkbox with multi-select sync
             var chkFactory = new FrameworkElementFactory(typeof(CheckBox));
             chkFactory.SetBinding(
                 System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty,
@@ -306,31 +321,94 @@ namespace HMVTools
             chkCol.CellTemplate = new DataTemplate { VisualTree = chkFactory };
             dg.Columns.Add(chkCol);
 
-            // ── Column 1: View Type (read-only) ────────────────
-            dg.Columns.Add(new DataGridTextColumn
+            // ── Original Number (read-only) ────────────────────
+            var origNumCol = new DataGridTextColumn
             {
-                Header = "Type",
-                Binding = new Binding("ViewType"),
-                Width = new DataGridLength(110),
+                Header = "Original #",
+                Binding = new Binding("OriginalNumber"),
+                Width = new DataGridLength(100),
                 IsReadOnly = true
-            });
+            };
+            var mutedStyle = new Style(typeof(DataGridCell));
+            mutedStyle.Setters.Add(new Setter(
+                DataGridCell.ForegroundProperty,
+                new SolidColorBrush(MutedText)));
+            origNumCol.CellStyle = mutedStyle;
+            dg.Columns.Add(origNumCol);
 
-            // ── Column 2: Original Name (read-only) ────────────
-            var origCol = new DataGridTextColumn
+            // ── New Number (editable) ──────────────────────────
+            var newNumCol = new DataGridTemplateColumn
+            {
+                Header = "New #",
+                Width = new DataGridLength(100),
+                SortMemberPath = "NewNumber"
+            };
+
+            var numDisplayFactory = new FrameworkElementFactory(typeof(TextBlock));
+            numDisplayFactory.SetBinding(TextBlock.TextProperty,
+                new Binding("NewNumber"));
+            numDisplayFactory.SetValue(TextBlock.PaddingProperty,
+                new Thickness(6, 4, 6, 4));
+            numDisplayFactory.SetValue(TextBlock.VerticalAlignmentProperty,
+                VerticalAlignment.Center);
+            newNumCol.CellTemplate = new DataTemplate
+            { VisualTree = numDisplayFactory };
+
+            var numEditFactory = new FrameworkElementFactory(typeof(TextBox));
+            numEditFactory.SetBinding(TextBox.TextProperty,
+                new Binding("NewNumber")
+                {
+                    Mode = BindingMode.TwoWay,
+                    UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
+                });
+            numEditFactory.SetValue(TextBox.BorderThicknessProperty,
+                new Thickness(0));
+            numEditFactory.SetValue(TextBox.PaddingProperty,
+                new Thickness(4, 2, 4, 2));
+            numEditFactory.SetValue(TextBox.FontSizeProperty, 12.5);
+            newNumCol.CellEditingTemplate = new DataTemplate
+            { VisualTree = numEditFactory };
+
+            // Number conflict style
+            var numCellStyle = new Style(typeof(DataGridCell));
+            var numConflict = new DataTrigger
+            {
+                Binding = new Binding("HasNumberConflict"),
+                Value = true
+            };
+            numConflict.Setters.Add(new Setter(
+                DataGridCell.BackgroundProperty,
+                new SolidColorBrush(Color.FromArgb(55, 220, 50, 50))));
+            numConflict.Setters.Add(new Setter(
+                DataGridCell.ToolTipProperty,
+                "Duplicate sheet number \u2013 will be skipped"));
+            numCellStyle.Triggers.Add(numConflict);
+
+            var numChanged = new DataTrigger
+            {
+                Binding = new Binding("NumberChanged"),
+                Value = true
+            };
+            numChanged.Setters.Add(new Setter(
+                DataGridCell.ForegroundProperty,
+                new SolidColorBrush(Color.FromRgb(0, 100, 180))));
+            numCellStyle.Triggers.Add(numChanged);
+
+            newNumCol.CellStyle = numCellStyle;
+            dg.Columns.Add(newNumCol);
+
+            // ── Original Name (read-only) ──────────────────────
+            var origNameCol = new DataGridTextColumn
             {
                 Header = "Original Name",
                 Binding = new Binding("OriginalName"),
                 Width = new DataGridLength(1, DataGridLengthUnitType.Star),
                 IsReadOnly = true
             };
-            var origCellStyle = new Style(typeof(DataGridCell));
-            origCellStyle.Setters.Add(new Setter(
-                DataGridCell.ForegroundProperty,
-                new SolidColorBrush(MutedText)));
-            origCol.CellStyle = origCellStyle;
-            dg.Columns.Add(origCol);
+            origNameCol.CellStyle = mutedStyle;
+            dg.Columns.Add(origNameCol);
 
-            // ── Column 3: New Name (editable) ──────────────────
+            // ── New Name (editable) ────────────────────────────
             var newNameCol = new DataGridTemplateColumn
             {
                 Header = "New Name",
@@ -338,95 +416,59 @@ namespace HMVTools
                 SortMemberPath = "NewName"
             };
 
-            // Display template
-            var displayFactory =
-                new FrameworkElementFactory(typeof(TextBlock));
-            displayFactory.SetBinding(TextBlock.TextProperty,
+            var nameDispFactory = new FrameworkElementFactory(typeof(TextBlock));
+            nameDispFactory.SetBinding(TextBlock.TextProperty,
                 new Binding("NewName"));
-            displayFactory.SetValue(TextBlock.PaddingProperty,
+            nameDispFactory.SetValue(TextBlock.PaddingProperty,
                 new Thickness(6, 4, 6, 4));
-            displayFactory.SetValue(TextBlock.VerticalAlignmentProperty,
+            nameDispFactory.SetValue(TextBlock.VerticalAlignmentProperty,
                 VerticalAlignment.Center);
             newNameCol.CellTemplate = new DataTemplate
-            { VisualTree = displayFactory };
+            { VisualTree = nameDispFactory };
 
-            // Editing template
-            var editFactory =
-                new FrameworkElementFactory(typeof(TextBox));
-            editFactory.SetBinding(TextBox.TextProperty,
+            var nameEditFactory = new FrameworkElementFactory(typeof(TextBox));
+            nameEditFactory.SetBinding(TextBox.TextProperty,
                 new Binding("NewName")
                 {
                     Mode = BindingMode.TwoWay,
                     UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged
                 });
-            editFactory.SetValue(TextBox.BorderThicknessProperty,
+            nameEditFactory.SetValue(TextBox.BorderThicknessProperty,
                 new Thickness(0));
-            editFactory.SetValue(TextBox.PaddingProperty,
+            nameEditFactory.SetValue(TextBox.PaddingProperty,
                 new Thickness(4, 2, 4, 2));
-            editFactory.SetValue(TextBox.FontSizeProperty, 12.5);
+            nameEditFactory.SetValue(TextBox.FontSizeProperty, 12.5);
             newNameCol.CellEditingTemplate = new DataTemplate
-            { VisualTree = editFactory };
+            { VisualTree = nameEditFactory };
 
-            // Cell style: conflict = red bg, changed = blue text
+            // Changed name style (blue text, no conflict for names)
             var nameCellStyle = new Style(typeof(DataGridCell));
-            var conflictTrigger = new DataTrigger
-            {
-                Binding = new Binding("HasConflict"),
-                Value = true
-            };
-            conflictTrigger.Setters.Add(new Setter(
-                DataGridCell.BackgroundProperty,
-                new SolidColorBrush(Color.FromArgb(55, 220, 50, 50))));
-            conflictTrigger.Setters.Add(new Setter(
-                DataGridCell.ToolTipProperty,
-                "Duplicate name within same view type \u2013 will be skipped"));
-            nameCellStyle.Triggers.Add(conflictTrigger);
-
-            var changedTrigger = new DataTrigger
+            var nameChangedTrigger = new DataTrigger
             {
                 Binding = new Binding("NameChanged"),
                 Value = true
             };
-            changedTrigger.Setters.Add(new Setter(
+            nameChangedTrigger.Setters.Add(new Setter(
                 DataGridCell.ForegroundProperty,
                 new SolidColorBrush(Color.FromRgb(0, 100, 180))));
-            nameCellStyle.Triggers.Add(changedTrigger);
-
+            nameCellStyle.Triggers.Add(nameChangedTrigger);
             newNameCol.CellStyle = nameCellStyle;
             dg.Columns.Add(newNameCol);
 
-            // ── Column 4: Sheets (read-only, selectable/copyable text) ──
-            var sheetCol = new DataGridTemplateColumn
+            // ── Views count (read-only) ────────────────────────
+            dg.Columns.Add(new DataGridTextColumn
             {
-                Header = "Sheet(s)",
-                Width = new DataGridLength(220),
-                IsReadOnly = true,
-                SortMemberPath = "Sheets"
-            };
-            var sheetFactory = new FrameworkElementFactory(typeof(TextBox));
-            sheetFactory.SetBinding(TextBox.TextProperty,
-                new Binding("Sheets") { Mode = BindingMode.OneWay });
-            sheetFactory.SetValue(TextBox.IsReadOnlyProperty, true);
-            sheetFactory.SetValue(TextBox.BorderThicknessProperty,
-                new Thickness(0));
-            sheetFactory.SetValue(TextBox.BackgroundProperty,
-                Brushes.Transparent);
-            sheetFactory.SetValue(TextBox.PaddingProperty,
-                new Thickness(6, 4, 6, 4));
-            sheetFactory.SetValue(TextBox.FontSizeProperty, 11.5);
-            sheetFactory.SetValue(TextBox.ForegroundProperty,
-                new SolidColorBrush(MutedText));
-            sheetFactory.SetValue(TextBox.TextWrappingProperty,
-                TextWrapping.NoWrap);
-            sheetCol.CellTemplate = new DataTemplate
-            { VisualTree = sheetFactory };
-            dg.Columns.Add(sheetCol);
+                Header = "Views",
+                Binding = new Binding("ViewCount"),
+                Width = new DataGridLength(55),
+                IsReadOnly = true
+            });
 
-            // Row style: subtle red on conflict rows
+            // Row style: subtle red on number conflict
             var rowStyle = new Style(typeof(DataGridRow));
             var rowConflict = new DataTrigger
             {
-                Binding = new Binding("HasConflict"),
+                Binding = new Binding("HasNumberConflict"),
                 Value = true
             };
             rowConflict.Setters.Add(new Setter(
@@ -440,7 +482,7 @@ namespace HMVTools
             return dg;
         }
 
-        // ── Tool row: Prefix + Cut ─────────────────────────────
+        // ── Tool row ───────────────────────────────────────────
 
         private StackPanel BuildToolRow()
         {
@@ -450,76 +492,94 @@ namespace HMVTools
                 Margin = new Thickness(0, 0, 0, 12)
             };
 
-            // --- Prefix row ---
-            var prefixRow = new StackPanel
+            // --- Number prefix row ---
+            var numPrefixRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 Margin = new Thickness(0, 0, 0, 6)
             };
+            numPrefixRow.Children.Add(Label("# Prefix:", 72));
+            var numPrefBorder = MakeInputBorder(180);
+            prefixNumBox = MakeInputTextBox();
+            numPrefBorder.Child = prefixNumBox;
+            numPrefixRow.Children.Add(numPrefBorder);
 
-            prefixRow.Children.Add(new TextBlock
-            {
-                Text = "Prefix:",
-                FontSize = 13,
-                Width = 48,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 0)
-            });
-
-            var prefixBorder = MakeInputBorder(220);
-            prefixBox = MakeInputTextBox();
-            prefixBorder.Child = prefixBox;
-            prefixRow.Children.Add(prefixBorder);
-
-            var addPrefixBtn = CreateButton("Add Prefix", BluePrimary,
+            var addNumPrefBtn = CreateButton("Add Prefix #", BluePrimary,
                 Color.FromRgb(255, 255, 255));
-            addPrefixBtn.Width = 110;
-            addPrefixBtn.Margin = new Thickness(8, 0, 0, 0);
-            addPrefixBtn.Click += AddPrefix_Click;
-            prefixRow.Children.Add(addPrefixBtn);
+            addNumPrefBtn.Width = 120;
+            addNumPrefBtn.Margin = new Thickness(8, 0, 0, 0);
+            addNumPrefBtn.Click += AddPrefixNumber_Click;
+            numPrefixRow.Children.Add(addNumPrefBtn);
 
-            var resetBtn = CreateButton("Reset Names", GrayBg,
-                Color.FromRgb(80, 80, 80));
-            resetBtn.Width = 110;
-            resetBtn.Margin = new Thickness(8, 0, 0, 0);
-            resetBtn.Click += ResetNames_Click;
-            prefixRow.Children.Add(resetBtn);
+            // Number cut
+            numPrefixRow.Children.Add(Spacer(16));
+            numPrefixRow.Children.Add(Label("# Cut:", 50));
+            var cutNumBorder = MakeInputBorder(140);
+            cutNumBox = MakeInputTextBox();
+            cutNumBorder.Child = cutNumBox;
+            numPrefixRow.Children.Add(cutNumBorder);
 
-            stack.Children.Add(prefixRow);
+            var cutNumBtn = CreateButton("Cut #", OrangeAccent,
+                Color.FromRgb(255, 255, 255));
+            cutNumBtn.Width = 80;
+            cutNumBtn.Margin = new Thickness(8, 0, 0, 0);
+            cutNumBtn.Click += CutNumber_Click;
+            numPrefixRow.Children.Add(cutNumBtn);
 
-            // --- Cut row ---
-            var cutRow = new StackPanel
+            stack.Children.Add(numPrefixRow);
+
+            // --- Name prefix row ---
+            var namePrefixRow = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            namePrefixRow.Children.Add(Label("Name Prefix:", 72));
+            var namePrefBorder = MakeInputBorder(180);
+            prefixNameBox = MakeInputTextBox();
+            namePrefBorder.Child = prefixNameBox;
+            namePrefixRow.Children.Add(namePrefBorder);
+
+            var addNamePrefBtn = CreateButton("Add Prefix Name", BluePrimary,
+                Color.FromRgb(255, 255, 255));
+            addNamePrefBtn.Width = 120;
+            addNamePrefBtn.Margin = new Thickness(8, 0, 0, 0);
+            addNamePrefBtn.Click += AddPrefixName_Click;
+            namePrefixRow.Children.Add(addNamePrefBtn);
+
+            // Name cut
+            namePrefixRow.Children.Add(Spacer(16));
+            namePrefixRow.Children.Add(Label("Name Cut:", 50));
+            var cutNameBorder = MakeInputBorder(140);
+            cutNameBox = MakeInputTextBox();
+            cutNameBorder.Child = cutNameBox;
+            namePrefixRow.Children.Add(cutNameBorder);
+
+            var cutNameBtn = CreateButton("Cut Name", OrangeAccent,
+                Color.FromRgb(255, 255, 255));
+            cutNameBtn.Width = 80;
+            cutNameBtn.Margin = new Thickness(8, 0, 0, 0);
+            cutNameBtn.Click += CutName_Click;
+            namePrefixRow.Children.Add(cutNameBtn);
+
+            stack.Children.Add(namePrefixRow);
+
+            // --- Reset row ---
+            var resetRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal
             };
-
-            cutRow.Children.Add(new TextBlock
-            {
-                Text = "Cut:",
-                FontSize = 13,
-                Width = 48,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 8, 0)
-            });
-
-            var cutBorder = MakeInputBorder(220);
-            cutBox = MakeInputTextBox();
-            cutBorder.Child = cutBox;
-            cutRow.Children.Add(cutBorder);
-
-            var cutBtn = CreateButton("Cut Text", OrangeAccent,
-                Color.FromRgb(255, 255, 255));
-            cutBtn.Width = 110;
-            cutBtn.Margin = new Thickness(8, 0, 0, 0);
-            cutBtn.Click += CutText_Click;
-            cutRow.Children.Add(cutBtn);
-
-            stack.Children.Add(cutRow);
+            var resetBtn = CreateButton("Reset All", GrayBg,
+                Color.FromRgb(80, 80, 80));
+            resetBtn.Width = 110;
+            resetBtn.Click += ResetAll_Click;
+            resetRow.Children.Add(resetBtn);
+            stack.Children.Add(resetRow);
 
             return stack;
         }
 
-        // ── Action buttons row ─────────────────────────────────
+        // ── Button row ─────────────────────────────────────────
 
         private StackPanel BuildButtonRow()
         {
@@ -549,12 +609,13 @@ namespace HMVTools
             return panel;
         }
 
-        // ── Event handlers ─────────────────────────────────────
+        // ── Events ─────────────────────────────────────────────
 
         private void Entry_PropertyChanged(object sender,
             PropertyChangedEventArgs e)
         {
-            if (e.PropertyName == "NewName")
+            if (e.PropertyName == "NewNumber"
+                || e.PropertyName == "NewName")
             {
                 CheckConflicts();
                 UpdateSummary();
@@ -571,9 +632,6 @@ namespace HMVTools
             }));
         }
 
-        /// <summary>
-        /// Select-all header checkbox: toggles every row.
-        /// </summary>
         private void SelectAll_Changed(object sender, RoutedEventArgs e)
         {
             if (_suppressCheckSync) return;
@@ -583,11 +641,6 @@ namespace HMVTools
             UpdateSummary();
         }
 
-        /// <summary>
-        /// When a row checkbox is clicked and multiple rows are
-        /// highlighted in the DataGrid, sync all highlighted rows
-        /// to the same checked state.
-        /// </summary>
         private void RowCheckBox_Click(object sender, RoutedEventArgs e)
         {
             if (_suppressCheckSync) return;
@@ -595,23 +648,19 @@ namespace HMVTools
 
             var chk = sender as CheckBox;
             bool newState = chk?.IsChecked == true;
+            var clicked = chk?.DataContext as SheetAuditEntry;
 
-            var clickedEntry = chk?.DataContext as ViewAuditEntry;
-
-            // If the clicked row is part of a multi-row highlight,
-            // apply the same state to every highlighted row
             var highlighted = dataGrid.SelectedItems
-                .OfType<ViewAuditEntry>().ToList();
+                .OfType<SheetAuditEntry>().ToList();
 
             if (highlighted.Count > 1
-                && clickedEntry != null
-                && highlighted.Contains(clickedEntry))
+                && clicked != null
+                && highlighted.Contains(clicked))
             {
                 foreach (var entry in highlighted)
                     entry.IsSelected = newState;
             }
 
-            // Update select-all header checkbox
             if (allEntries.All(x => x.IsSelected))
                 selectAllCheckBox.IsChecked = true;
             else if (allEntries.All(x => !x.IsSelected))
@@ -630,82 +679,93 @@ namespace HMVTools
             collectionView.Filter = obj =>
             {
                 if (string.IsNullOrEmpty(filter)) return true;
-                var entry = obj as ViewAuditEntry;
+                var entry = obj as SheetAuditEntry;
                 if (entry == null) return false;
-                return entry.OriginalName.ToLower().Contains(filter)
-                    || entry.NewName.ToLower().Contains(filter)
-                    || entry.ViewType.ToLower().Contains(filter)
-                    || entry.Sheets.ToLower().Contains(filter);
+                return entry.OriginalNumber.ToLower().Contains(filter)
+                    || entry.OriginalName.ToLower().Contains(filter)
+                    || entry.NewNumber.ToLower().Contains(filter)
+                    || entry.NewName.ToLower().Contains(filter);
             };
         }
 
-        private void AddPrefix_Click(object sender, RoutedEventArgs e)
+        // ── Prefix / Cut handlers ──────────────────────────────
+
+        private void AddPrefixNumber_Click(object sender, RoutedEventArgs e)
         {
-            string prefix = prefixBox.Text;
+            string prefix = prefixNumBox.Text;
             if (string.IsNullOrEmpty(prefix))
+            { ShowMsg("Enter a prefix for the sheet number."); return; }
+
+            int count = 0;
+            foreach (var entry in allEntries)
             {
-                MessageBox.Show("Enter a prefix first.",
-                    "HMV Tools", MessageBoxButton.OK);
-                return;
+                if (!entry.IsSelected) continue;
+                if (!entry.NewNumber.StartsWith(prefix))
+                { entry.NewNumber = prefix + entry.NewNumber; count++; }
             }
+            Refresh();
+            if (count == 0) ShowMsg("No sheets were modified.");
+        }
+
+        private void CutNumber_Click(object sender, RoutedEventArgs e)
+        {
+            string text = cutNumBox.Text;
+            if (string.IsNullOrEmpty(text))
+            { ShowMsg("Enter the text to remove from sheet numbers."); return; }
+
+            int count = 0;
+            foreach (var entry in allEntries)
+            {
+                if (!entry.IsSelected) continue;
+                if (entry.NewNumber.Contains(text))
+                { entry.NewNumber = entry.NewNumber.Replace(text, ""); count++; }
+            }
+            Refresh();
+            if (count == 0) ShowMsg("No selected sheets contained the specified text in their number.");
+        }
+
+        private void AddPrefixName_Click(object sender, RoutedEventArgs e)
+        {
+            string prefix = prefixNameBox.Text;
+            if (string.IsNullOrEmpty(prefix))
+            { ShowMsg("Enter a prefix for the sheet name."); return; }
 
             int count = 0;
             foreach (var entry in allEntries)
             {
                 if (!entry.IsSelected) continue;
                 if (!entry.NewName.StartsWith(prefix))
-                {
-                    entry.NewName = prefix + entry.NewName;
-                    count++;
-                }
+                { entry.NewName = prefix + entry.NewName; count++; }
             }
-
-            CheckConflicts();
-            UpdateSummary();
-
-            if (count == 0)
-                MessageBox.Show(
-                    "No views were modified. Either none are selected "
-                    + "or all already have this prefix.",
-                    "HMV Tools", MessageBoxButton.OK);
+            Refresh();
+            if (count == 0) ShowMsg("No sheets were modified.");
         }
 
-        private void CutText_Click(object sender, RoutedEventArgs e)
+        private void CutName_Click(object sender, RoutedEventArgs e)
         {
-            string cutText = cutBox.Text;
-            if (string.IsNullOrEmpty(cutText))
-            {
-                MessageBox.Show("Enter the text to remove.",
-                    "HMV Tools", MessageBoxButton.OK);
-                return;
-            }
+            string text = cutNameBox.Text;
+            if (string.IsNullOrEmpty(text))
+            { ShowMsg("Enter the text to remove from sheet names."); return; }
 
             int count = 0;
             foreach (var entry in allEntries)
             {
                 if (!entry.IsSelected) continue;
-                if (entry.NewName.Contains(cutText))
-                {
-                    entry.NewName = entry.NewName.Replace(cutText, "");
-                    count++;
-                }
+                if (entry.NewName.Contains(text))
+                { entry.NewName = entry.NewName.Replace(text, ""); count++; }
             }
-
-            CheckConflicts();
-            UpdateSummary();
-
-            if (count == 0)
-                MessageBox.Show(
-                    "No selected views contained the specified text.",
-                    "HMV Tools", MessageBoxButton.OK);
+            Refresh();
+            if (count == 0) ShowMsg("No selected sheets contained the specified text in their name.");
         }
 
-        private void ResetNames_Click(object sender, RoutedEventArgs e)
+        private void ResetAll_Click(object sender, RoutedEventArgs e)
         {
             foreach (var entry in allEntries)
+            {
+                entry.NewNumber = entry.OriginalNumber;
                 entry.NewName = entry.OriginalName;
-            CheckConflicts();
-            UpdateSummary();
+            }
+            Refresh();
         }
 
         private void Apply_Click(object sender, RoutedEventArgs e)
@@ -713,20 +773,16 @@ namespace HMVTools
             CheckConflicts();
 
             int changes = allEntries.Count(
-                x => x.NameChanged && !x.HasConflict);
-            int conflicts = allEntries.Count(x => x.HasConflict);
+                x => x.AnyChanged && !x.HasNumberConflict);
+            int conflicts = allEntries.Count(x => x.HasNumberConflict);
 
             if (changes == 0 && conflicts == 0)
-            {
-                MessageBox.Show("No name changes to apply.",
-                    "HMV Tools", MessageBoxButton.OK);
-                return;
-            }
+            { ShowMsg("No changes to apply."); return; }
 
-            string msg = $"{changes} view(s) will be renamed.";
+            string msg = $"{changes} sheet(s) will be updated.";
             if (conflicts > 0)
-                msg += $"\n{conflicts} view(s) have duplicate names "
-                     + "(within same type) and will be SKIPPED.";
+                msg += $"\n{conflicts} sheet(s) have duplicate numbers "
+                     + "and will be SKIPPED.";
             msg += "\n\nProceed?";
 
             var result = MessageBox.Show(msg, "HMV Tools \u2013 Confirm",
@@ -739,71 +795,78 @@ namespace HMVTools
             Close();
         }
 
-        // ── Conflict detection (same view type only) ───────────
+        // ── Conflict detection (sheet numbers only) ────────────
 
         private void CheckConflicts()
         {
-            // Group by ViewType, check for duplicate NewName within each
-            var groups = allEntries.GroupBy(e => e.ViewType);
-
-            var conflictKeys = new HashSet<string>();
-            foreach (var group in groups)
+            // Duplicate NewNumber within the table
+            var numCounts = new Dictionary<string, int>(
+                StringComparer.Ordinal);
+            foreach (var entry in allEntries)
             {
-                var nameCounts = new Dictionary<string, int>(
-                    StringComparer.Ordinal);
-                foreach (var entry in group)
-                {
-                    if (!nameCounts.ContainsKey(entry.NewName))
-                        nameCounts[entry.NewName] = 0;
-                    nameCounts[entry.NewName]++;
-                }
-                foreach (var kvp in nameCounts)
-                {
-                    if (kvp.Value > 1)
-                        conflictKeys.Add(group.Key + "\x00" + kvp.Key);
-                }
+                if (!numCounts.ContainsKey(entry.NewNumber))
+                    numCounts[entry.NewNumber] = 0;
+                numCounts[entry.NewNumber]++;
             }
 
             foreach (var entry in allEntries)
             {
                 bool conflict = false;
 
-                // Duplicate within same type in the table
-                string key = entry.ViewType + "\x00" + entry.NewName;
-                if (conflictKeys.Contains(key))
+                if (numCounts.ContainsKey(entry.NewNumber)
+                    && numCounts[entry.NewNumber] > 1)
                     conflict = true;
 
-                // Conflict with external project views (same type)
-                if (!conflict && entry.NewName != entry.OriginalName)
-                {
-                    string extKey = entry.ViewType + "\x00" + entry.NewName;
-                    if (externalViewTypeNames.Contains(extKey))
-                        conflict = true;
-                }
+                // Conflict with external sheets
+                if (!conflict
+                    && entry.NewNumber != entry.OriginalNumber
+                    && externalSheetNumbers.Contains(entry.NewNumber))
+                    conflict = true;
 
-                entry.HasConflict = conflict;
+                entry.HasNumberConflict = conflict;
             }
         }
 
-        // ── Summary update ─────────────────────────────────────
+        // ── Summary ────────────────────────────────────────────
 
         private void UpdateSummary()
         {
             int total = allEntries.Count;
             int selected = allEntries.Count(e => e.IsSelected);
-            int modified = allEntries.Count(e => e.NameChanged);
-            int conflicts = allEntries.Count(e => e.HasConflict);
+            int modified = allEntries.Count(e => e.AnyChanged);
+            int conflicts = allEntries.Count(e => e.HasNumberConflict);
 
             summaryText.Text =
                 $"Total: {total}    Selected: {selected}    "
-                + $"Modified: {modified}    Conflicts: {conflicts}";
+                + $"Modified: {modified}    # Conflicts: {conflicts}";
         }
 
-        // ── UI helpers ─────────────────────────────────────────
+        // ── Helpers ────────────────────────────────────────────
 
-        private Border MakeInputBorder(double width)
+        private void Refresh()
         {
-            return new Border
+            CheckConflicts();
+            UpdateSummary();
+        }
+
+        private void ShowMsg(string text) =>
+            MessageBox.Show(text, "HMV Tools", MessageBoxButton.OK);
+
+        private TextBlock Label(string text, double width) =>
+            new TextBlock
+            {
+                Text = text,
+                FontSize = 13,
+                Width = width,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 8, 0)
+            };
+
+        private FrameworkElement Spacer(double w) =>
+            new Border { Width = w };
+
+        private Border MakeInputBorder(double width) =>
+            new Border
             {
                 CornerRadius = new CornerRadius(8),
                 BorderBrush = new SolidColorBrush(BorderColor),
@@ -811,11 +874,9 @@ namespace HMVTools
                 Background = Brushes.White,
                 Width = width
             };
-        }
 
-        private TextBox MakeInputTextBox()
-        {
-            return new TextBox
+        private TextBox MakeInputTextBox() =>
+            new TextBox
             {
                 Height = 32,
                 FontSize = 13,
@@ -824,7 +885,6 @@ namespace HMVTools
                 Background = Brushes.Transparent,
                 Padding = new Thickness(10, 0, 10, 0)
             };
-        }
 
         private Button CreateButton(string text, Color bgColor,
             Color fgColor)

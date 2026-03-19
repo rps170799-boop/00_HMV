@@ -20,13 +20,13 @@ namespace HMVTools
 
             try
             {
-                // ── 1. Build View → Sheets map via Viewports ───
+                // ── 1. Build View -> Sheets map via Viewports ──
                 var viewports = new FilteredElementCollector(doc)
                     .OfClass(typeof(Viewport))
                     .Cast<Viewport>()
                     .ToList();
 
-                // viewId → list of "SheetNumber - SheetName"
+                // viewId -> list of "SheetNumber - SheetName"
                 var viewToSheets =
                     new Dictionary<ElementId, List<string>>();
 
@@ -81,17 +81,30 @@ namespace HMVTools
                     .ThenBy(e => e.OriginalName)
                     .ToList();
 
-                // ── 3. Collect ALL view names for conflict check
-                var allViewNames = new HashSet<string>(
-                    new FilteredElementCollector(doc)
-                        .OfClass(typeof(View))
-                        .Cast<View>()
-                        .Where(v => !v.IsTemplate)
-                        .Select(v => v.Name));
+                // ── 3. Collect all project "Type\0Name" keys ───
+                // Conflict detection is scoped to same view type
+                var tableKeys = new HashSet<string>(
+                    entries.Select(e => e.ViewType + "\x00" + e.OriginalName));
+
+                var allViewTypeNames = new HashSet<string>();
+                var allViews = new FilteredElementCollector(doc)
+                    .OfClass(typeof(View))
+                    .Cast<View>()
+                    .Where(v => !v.IsTemplate);
+
+                foreach (var v in allViews)
+                {
+                    string key = GetFriendlyViewType(v)
+                        + "\x00" + v.Name;
+                    // Only include views NOT in our table
+                    // (external names for conflict checking)
+                    if (!tableKeys.Contains(key))
+                        allViewTypeNames.Add(key);
+                }
 
                 // ── 4. Show window ─────────────────────────────
                 var window = new ViewAuditWindow(
-                    entries, allViewNames);
+                    entries, allViewTypeNames);
 
                 bool? ok = window.ShowDialog();
                 if (ok != true || window.Results == null)
@@ -114,7 +127,7 @@ namespace HMVTools
                 var errors = new List<string>();
 
                 using (Transaction tx = new Transaction(
-                    doc, "HMV – Rename Views"))
+                    doc, "HMV - Rename Views"))
                 {
                     tx.Start();
 
@@ -138,7 +151,7 @@ namespace HMVTools
                         {
                             skipped++;
                             errors.Add(
-                                $"  • {entry.OriginalName} → "
+                                $"  {entry.OriginalName} -> "
                                 + $"{entry.NewName}: {ex.Message}");
                         }
                     }
@@ -159,7 +172,7 @@ namespace HMVTools
                     summary += "\n\nErrors:\n"
                         + string.Join("\n", errors);
 
-                TaskDialog.Show("HMV Tools – View Audit", summary);
+                TaskDialog.Show("HMV Tools - View Audit", summary);
 
                 return Result.Succeeded;
             }
@@ -170,7 +183,7 @@ namespace HMVTools
             }
             catch (Exception ex)
             {
-                TaskDialog.Show("HMV Tools – Error", ex.ToString());
+                TaskDialog.Show("HMV Tools - Error", ex.ToString());
                 return Result.Failed;
             }
         }

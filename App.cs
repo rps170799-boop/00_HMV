@@ -175,24 +175,35 @@ namespace HMVTools
             BitmapImage iconTA = LoadImage("HMVTools.Resources.textaudit_32.png");
             if (iconTA != null) btnTA.LargeImage = iconTA;
 
+            // View Audit button
             PushButtonData btnViewAudit = new PushButtonData(
-            "ViewAudit",
-            "View\nAudit",
-            path,
-            "HMVTools.ViewAuditCommand");
+                "ViewAudit", "View\nAudit", path,
+                "HMVTools.ViewAuditCommand");
             btnViewAudit.ToolTip = "Audit and rename views placed on sheets";
             btnViewAudit.LongDescription =
                 "Displays an interactive table of all views placed on sheets:\n\n"
                 + "• View type, original name, editable new name, sheet(s)\n"
-                + "• Bulk prefix addition to selected views\n"
-                + "• Duplicate name detection (red highlight)\n"
+                + "• Bulk prefix addition and text cutting on selected views\n"
+                + "• Duplicate name detection scoped to same view type (red highlight)\n"
                 + "• Conflicting views are skipped when applying changes";
             PushButton btnVA = panelAudit.AddItem(btnViewAudit) as PushButton;
             BitmapImage iconVA = LoadImage("HMVTools.Resources.viewaudit_32.png");
             if (iconVA != null) btnVA.LargeImage = iconVA;
 
-
-
+            // Sheet Audit button
+            PushButtonData btnSheetAudit = new PushButtonData(
+                "SheetAudit", "Sheet\nAudit", path,
+                "HMVTools.SheetAuditCommand");
+            btnSheetAudit.ToolTip = "Audit and rename sheet numbers and names";
+            btnSheetAudit.LongDescription =
+                "Displays an interactive table of all sheets in the project:\n\n"
+                + "• Editable sheet number and sheet name columns\n"
+                + "• Bulk prefix addition and text cutting for both fields\n"
+                + "• Duplicate number detection (red highlight)\n"
+                + "• Sheets with conflicting numbers are skipped when applying";
+            PushButton btnSA = panelAudit.AddItem(btnSheetAudit) as PushButton;
+            BitmapImage iconSA = LoadImage("HMVTools.Resources.sheetaudit_32.png");
+            if (iconSA != null) btnSA.LargeImage = iconSA;
 
             return Result.Succeeded;
         }
