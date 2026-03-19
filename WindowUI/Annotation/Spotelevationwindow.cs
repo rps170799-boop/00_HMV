@@ -22,8 +22,10 @@ namespace HMVTools
         public int FoundationSourceIndex { get; set; }
         public int FloorLinkIndex { get; set; }
         public double LeaderOffsetMm { get; set; }
-        public bool BothAxis { get; set; }
+        public bool OffsetX { get; set; }
+        public bool OffsetY { get; set; }
         public bool UseHmvStandard { get; set; }
+        public bool CreateGrid { get; set; }
     }
 
     // ── Window ─────────────────────────────────────────────────
@@ -34,7 +36,9 @@ namespace HMVTools
         private ComboBox cmbFoundationSource;
         private ComboBox cmbFloorLink;
         private TextBox txtLeaderOffset;
-        private CheckBox chkBothAxis;
+        private CheckBox chkOffsetX;
+        private CheckBox chkOffsetY;
+        private CheckBox chkGrid;
         private CheckBox chkHmvStandard;
 
         // Data
@@ -149,16 +153,38 @@ namespace HMVTools
             offsetBorder.Child = txtLeaderOffset;
             offsetRow.Children.Add(offsetBorder);
 
-            chkBothAxis = new CheckBox
+            chkOffsetX = new CheckBox
             {
-                Content = "Both axis",
+                Content = "X",
                 FontSize = 13,
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = new SolidColorBrush(DarkText),
                 Margin = new Thickness(16, 0, 0, 0),
                 IsChecked = true
             };
-            offsetRow.Children.Add(chkBothAxis);
+            offsetRow.Children.Add(chkOffsetX);
+
+            chkOffsetY = new CheckBox
+            {
+                Content = "Y",
+                FontSize = 13,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush(DarkText),
+                Margin = new Thickness(8, 0, 0, 0),
+                IsChecked = true
+            };
+            offsetRow.Children.Add(chkOffsetY);
+
+            chkGrid = new CheckBox
+            {
+                Content = "Grid?",
+                FontSize = 13,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush(DarkText),
+                Margin = new Thickness(16, 0, 0, 0),
+                IsChecked = false
+            };
+            offsetRow.Children.Add(chkGrid);
 
             Grid.SetRow(offsetRow, 3);
             main.Children.Add(offsetRow);
@@ -271,8 +297,10 @@ namespace HMVTools
                 FoundationSourceIndex = foundSrcIdx,
                 FloorLinkIndex = cmbFloorLink.SelectedIndex,
                 LeaderOffsetMm = offset,
-                BothAxis = chkBothAxis.IsChecked == true,
-                UseHmvStandard = chkHmvStandard.IsChecked == true
+                OffsetX = chkOffsetX.IsChecked == true,
+                OffsetY = chkOffsetY.IsChecked == true,
+                UseHmvStandard = chkHmvStandard.IsChecked == true,
+                CreateGrid = chkGrid.IsChecked == true
             };
 
             DialogResult = true;

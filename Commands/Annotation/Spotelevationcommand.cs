@@ -67,8 +67,10 @@ namespace HMVTools
 
             SpotElevationSettings settings = win.Settings;
             double leaderOffset = settings.LeaderOffsetMm * MmToFeet;
-            bool bothAxis = settings.BothAxis;
+            bool offsetX = settings.OffsetX;
+            bool offsetY = settings.OffsetY;
             bool hmvStandard = settings.UseHmvStandard;
+            bool createGrid = settings.CreateGrid;
 
             RevitLinkInstance floorLink =
                 linkInstances[settings.FloorLinkIndex];
@@ -173,7 +175,7 @@ namespace HMVTools
             }
 
             // ── Process ─────────────────────────────────────────
-            int placedNap = 0, placedNtce = 0;
+            int placedNap = 0, placedNtce = 0, placedGrids = 0;
             var skipped = new List<string>();
             var debugInfo = new List<string>();
 
@@ -183,6 +185,7 @@ namespace HMVTools
             // Collect placed spots for type assignment later
             var ntceSpots = new List<SpotDimension>();
             var napSpots = new List<SpotDimension>();
+            var gridLineData = new List<KeyValuePair<XYZ, XYZ>>();
 
             using (Transaction tx = new Transaction(doc,
                 "HMV – Spot Elevations on Floors"))
@@ -196,8 +199,8 @@ namespace HMVTools
                 foreach (var fd in foundations)
                 {
                     XYZ hostCenter = fd.HostCenter;
-                    double offX = leaderOffset;
-                    double offY = bothAxis ? leaderOffset : 0;
+                    double offX = offsetX ? leaderOffset : 0;
+                    double offY = offsetY ? leaderOffset : 0;
 
                     // ── NAP: floor top face ─────────────────────
                     XYZ rayOrigin = new XYZ(
@@ -312,6 +315,10 @@ namespace HMVTools
 
                                 napSpots.Add(spotNap);
                                 placedNap++;
+                                if (createGrid)
+                                    gridLineData.Add(
+                                        new KeyValuePair<XYZ, XYZ>(
+                                            napPoint, napEnd));
                             }
                         }
                         catch (Exception ex)
@@ -340,7 +347,14 @@ namespace HMVTools
                                     napPoint, bend, end,
                                     napPoint, true);
 
-                            if (spot != null) placedNap++;
+                            if (spot != null)
+                            {
+                                placedNap++;
+                                if (createGrid)
+                                    gridLineData.Add(
+                                        new KeyValuePair<XYZ, XYZ>(
+                                            napPoint, end));
+                            }
                             else skipped.Add(
                                 $"{fd.Name} → returned null");
                         }
@@ -439,6 +453,83 @@ namespace HMVTools
                     }
                 }
 
+                // ════════════════════════════════════════════════
+                // PHASE 3: Create grids if requested
+                // ════════════════════════════════════════════════
+
+                if (createGrid && gridLineData.Count > 0)
+                {
+                    double gridTol = 1.0 * MmToFeet;
+
+                    // Horizontal grids (X direction) – group by Y
+                    if (offsetX)
+                    {
+                        var yGroups = GroupByCoordinate(
+                            gridLineData, p => p.Key.Y, gridTol);
+                        foreach (var g in yGroups)
+                        {
+                            double y = g.Key;
+                            double minX = g.Value.Min(
+                                p => Math.Min(p.Key.X, p.Value.X));
+                            double maxX = g.Value.Max(
+                                p => Math.Max(p.Key.X, p.Value.X));
+                            if (Math.Abs(maxX - minX) < gridTol)
+                                continue;
+                            try
+                            {
+                                Line ln = Line.CreateBound(
+                                    new XYZ(minX, y, 0),
+                                    new XYZ(maxX, y, 0));
+                                Grid grid = Grid.Create(doc, ln);
+                                if (grid != null)
+                                {
+                                    grid.Pinned = false;
+                                    placedGrids++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                debugInfo.Add(
+                                    $"Grid X error: {ex.Message}");
+                            }
+                        }
+                    }
+
+                    // Vertical grids (Y direction) – group by X
+                    if (offsetY)
+                    {
+                        var xGroups = GroupByCoordinate(
+                            gridLineData, p => p.Key.X, gridTol);
+                        foreach (var g in xGroups)
+                        {
+                            double x = g.Key;
+                            double minY = g.Value.Min(
+                                p => Math.Min(p.Key.Y, p.Value.Y));
+                            double maxY = g.Value.Max(
+                                p => Math.Max(p.Key.Y, p.Value.Y));
+                            if (Math.Abs(maxY - minY) < gridTol)
+                                continue;
+                            try
+                            {
+                                Line ln = Line.CreateBound(
+                                    new XYZ(x, minY, 0),
+                                    new XYZ(x, maxY, 0));
+                                Grid grid = Grid.Create(doc, ln);
+                                if (grid != null)
+                                {
+                                    grid.Pinned = false;
+                                    placedGrids++;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                debugInfo.Add(
+                                    $"Grid Y error: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+
                 tx.Commit();
             }
 
@@ -453,6 +544,8 @@ namespace HMVTools
             else
                 report += $"Spot elevations placed: {placedNap}\n";
 
+            if (createGrid)
+                report += $"Grids created: {placedGrids}\n";
             report += $"Skipped: {skipped.Count}\n";
 
             if (skipped.Count > 0)
@@ -790,6 +883,36 @@ namespace HMVTools
                 { bestProx = rwc.Proximity; best = rwc; }
             }
             return best;
+        }
+
+        // ── Group points by coordinate for shared grid lines ────
+
+        private Dictionary<double, List<KeyValuePair<XYZ, XYZ>>>
+            GroupByCoordinate(
+                List<KeyValuePair<XYZ, XYZ>> data,
+                Func<KeyValuePair<XYZ, XYZ>, double> selector,
+                double tolerance)
+        {
+            var groups =
+                new Dictionary<double, List<KeyValuePair<XYZ, XYZ>>>();
+            foreach (var pair in data)
+            {
+                double val = selector(pair);
+                bool found = false;
+                foreach (double key in groups.Keys.ToList())
+                {
+                    if (Math.Abs(val - key) < tolerance)
+                    {
+                        groups[key].Add(pair);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                    groups[val] =
+                        new List<KeyValuePair<XYZ, XYZ>> { pair };
+            }
+            return groups;
         }
 
         // ── Safe parameter setters ──────────────────────────────
