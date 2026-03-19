@@ -75,6 +75,7 @@
     <Compile Include="Commands\Audit\Sheetauditcommand.cs" />
     <Compile Include="Commands\Audit\Viewauditcommand.cs" />
     <Compile Include="Commands\DWG\DwgConvertCommand.cs" />
+    <Compile Include="Commands\FamilyControl\MultiParamEditorCommand.cs" />
     <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
     <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
@@ -93,6 +94,8 @@
     <Compile Include="Commands\Annotation\TopographyToLinesCommand.cs" />
     <Compile Include="WindowUI\Annotation\TopographyToLinesWindow.cs" />
     <Compile Include="Commands\FamilyControl\Usdtuberiaconfigcommand.cs" />
+    <Compile Include="WindowUI\FamilyControl\MultiParamEditorWindow.cs" />
+    <Compile Include="WindowUI\FamilyControl\MultiParamModeWindow.cs" />
     <Compile Include="WindowUI\FamilyControl\Refreshztofloorwindow.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -120,6 +123,9 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\sheetaudit_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\multiparam_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

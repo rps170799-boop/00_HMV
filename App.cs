@@ -75,6 +75,26 @@ namespace HMVTools
             BitmapImage iconRZ = LoadImage("HMVTools.Resources.refreshz_32.png");
             if (iconRZ != null) btnRZ.LargeImage = iconRZ;
 
+            PushButtonData btnMultiParam = new PushButtonData(
+                "MultiParamEditor",
+                "Multi InstParam\nEditor",
+                path,
+                "HMVTools.MultiParamEditorCommand");
+            btnMultiParam.ToolTip = "Edit multiple instance parameters simultaneously";
+            btnMultiParam.LongDescription =
+                "Select one or more family instances, then edit multiple instance "
+                + "parameters in a single transaction to avoid constraint conflicts.\n\n"
+                + "Features:\n"
+                + "• Dynamic parameter rows with dropdown and value input\n"
+                + "• Auto-detects parameter units (mm, m, °, etc.)\n"
+                + "• Shows current values in grey (comma-separated if they vary)\n"
+                + "• Multiple families: choose Common Parameters or Each Family mode\n"
+                + "• Each Family mode persists rows independently per family\n"
+                + "• All parameters applied simultaneously in one transaction";
+            PushButton btnMP = panelFamily.AddItem(btnMultiParam) as PushButton;
+            BitmapImage iconMP = LoadImage("HMVTools.Resources.multiparam_32.png");
+            if (iconMP != null) btnMP.LargeImage = iconMP;
+
             // ── Annotation Tools Panel ──
             RibbonPanel panelAnnot = app.CreateRibbonPanel("HMV Tools", "Annotation Tools");
 
@@ -85,13 +105,13 @@ namespace HMVTools
                 "HMVTools.TopographyToLinesCommand");
             btnTopoLines.ToolTip = "Convert topography to detail lines";
             btnTopoLines.LongDescription =
-                "Extrae las curvas de nivel de la topografía contenida en un vínculo "
-                + "de Revit y las convierte en líneas de detalle nativas en la vista activa.\n\n"
-                + "Funciones:\n"
-                + "• Selección de vínculo de Revit con topografía\n"
-                + "• Cálculo automático de intersecciones con el plano de vista\n"
-                + "• Creación de líneas de detalle en la vista activa\n"
-                + "• Reporte de líneas creadas y omitidas";
+                "Extracts contour lines from a topography contained in a Revit link "
+                + "and converts them into native detail lines in the active view.\n\n"
+                + "Features:\n"
+                + "• Select a Revit link containing topography\n"
+                + "• Automatic intersection calculation with the view plane\n"
+                + "• Detail line creation in the active view\n"
+                + "• Report of lines created and skipped";
             PushButton btnTopo = panelAnnot.AddItem(btnTopoLines) as PushButton;
             BitmapImage iconTopo = LoadImage("HMVTools.Resources.topo_32.png");
             if (iconTopo != null) btnTopo.LargeImage = iconTopo;
@@ -103,13 +123,13 @@ namespace HMVTools
                 "HMVTools.PlaceAnnotationsAlongPipeCmd");
             btnPipeAnnot.ToolTip = "Place annotations along paths";
             btnPipeAnnot.LongDescription =
-                "Coloca instancias de una familia de anotación genérica a lo largo "
-                + "del recorrido de tuberías (Pipe) , tuberías flexibles (FlexPipe) y tambien vigas (Structural Framing).\n\n"
-                + "Funciones:\n"
-                + "• Selección de Pipes , FlexPipes, y Structural Framing\n"
-                + "• Espaciado configurable entre anotaciones\n"
-                + "• Orientación automática según la tangente del recorrido\n"
-                + "• Funciona con tramos rectos, arcos y splines";
+                "Places instances of a generic annotation family along the path "
+                + "of Pipes, Flex Pipes, and Structural Framing elements.\n\n"
+                + "Features:\n"
+                + "• Selection of Pipes, Flex Pipes, and Structural Framing\n"
+                + "• Configurable spacing between annotations\n"
+                + "• Automatic orientation based on path tangent\n"
+                + "• Works with straight segments, arcs, and splines";
             PushButton btnPA = panelAnnot.AddItem(btnPipeAnnot) as PushButton;
             BitmapImage iconPipeAnnot = LoadImage("HMVTools.Resources.pipeannotation_32.png");
             if (iconPipeAnnot != null) btnPA.LargeImage = iconPipeAnnot;
@@ -161,16 +181,16 @@ namespace HMVTools
                 "HMVTools.TextAuditCommand");
             btnTextAudit.ToolTip = "Standardize all text styles and annotation tag families";
             btnTextAudit.LongDescription =
-                "Ejecuta un proceso completo de estandarización de textos en el proyecto:\n\n"
-                + "Step 1 – Standardize Properties: normaliza Font (Arial), Width (1.0), "
-                + "Bold (No), Background (Opaque) y Size (snap a 1.5/2/2.5/3/3.5 mm) "
-                + "en todos los TextNoteTypes y DimensionTypes.\n\n"
-                + "Step 2 – Merge Types: agrupa TextNoteTypes por tamaño, renombra el "
-                + "keeper a HMV_General_Xmm Arial y reasigna todas las instancias.\n\n"
-                + "Step 3 – Purge: elimina los tipos vacíos que quedaron sin instancias.\n\n"
-                + "Step 4 – Tag Families: abre cada familia de anotación, estandariza "
-                + "las propiedades de texto internas y recarga la familia al proyecto.\n\n"
-                + "Al finalizar muestra un reporte completo de todos los cambios.";
+                "Standardize Texts:\n\n"
+                + "Step 1 – Standardize Properties: normalizes Font (Arial), Width (1.0), "
+                + "Bold (No), Background (Opaque) and Size (snap to 1.5/2/2.5/3/3.5 mm) "
+                + "across all TextNoteTypes and DimensionTypes.\n\n"
+                + "Step 2 – Merge Types: groups TextNoteTypes by size, renames the "
+                + "keeper to HMV_General_Xmm Arial and reassigns all instances.\n\n"
+                + "Step 3 – Purge: removes empty types left with no instances.\n\n"
+                + "Step 4 – Tag Families: opens each annotation family, standardizes "
+                + "the internal text properties and reloads the family into the project.\n\n"
+                + "Displays a complete report of all changes when finished.";
             PushButton btnTA = panelAudit.AddItem(btnTextAudit) as PushButton;
             BitmapImage iconTA = LoadImage("HMVTools.Resources.textaudit_32.png");
             if (iconTA != null) btnTA.LargeImage = iconTA;
