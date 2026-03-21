@@ -33,6 +33,26 @@ namespace HMVTools
             BitmapImage icon = LoadImage("HMVTools.Resources.dwg_32.png");
             if (icon != null) btn.LargeImage = icon;
 
+            PushButtonData btnDwg3D = new PushButtonData(
+                "Dwg3DToShape",
+                "3D DWG\nto Shape",
+                path,
+                "HMVTools.Dwg3DToShapeCommand");
+            btnDwg3D.ToolTip = "Convert imported 3D DWG geometry to a native DirectShape";
+            btnDwg3D.LongDescription =
+                "Extracts Solids and Meshes from an imported DWG element "
+                + "and creates a single DirectShape in the chosen category.\n\n"
+                + "Features:\n"
+                + "• Recursive geometry extraction (handles nested GeometryInstances)\n"
+                + "• Volume threshold to skip bolts and small parts\n"
+                + "• TessellatedShapeBuilder for mesh-to-solid conversion\n"
+                + "• Detailed report of kept/skipped/converted geometry";
+            PushButton btnD3 = panelDwg.AddItem(btnDwg3D) as PushButton;
+            BitmapImage iconD3 = LoadImage("HMVTools.Resources.dwg3d_32.png");
+            if (iconD3 != null) btnD3.LargeImage = iconD3;
+
+
+
             // ── Family Control Tools Panel ──
             RibbonPanel panelFamily = app.CreateRibbonPanel("HMV Tools", "Family Control Tools");
 
@@ -170,6 +190,41 @@ namespace HMVTools
             BitmapImage iconSE = LoadImage("HMVTools.Resources.spotelev_32.png");
             if (iconSE != null) btnSE.LargeImage = iconSE;
 
+            PushButtonData btnAnnotTag = new PushButtonData(
+            "GenericAnnotationTag",
+            "Generic Annot\nTag",
+            path,
+            "HMVTools.GenericAnnotationTagCommand");
+            btnAnnotTag.ToolTip = "Tag linked elements with a TextNote + leader";
+            btnAnnotTag.LongDescription =
+                "Reads a parameter value from elements in a Revit link "
+                + "and places a Generic Annotation at each element's location "
+                + "with the value written into the annotation's text parameter.\n\n"
+                + "Workflow:\n"
+                + "1. Pick elements in a linked model.\n"
+                + "2. Choose annotation family, offset, and source parameter.\n"
+                + "3. Annotations are placed with the parameter value.";
+            PushButton btnAT = panelAnnot.AddItem(btnAnnotTag) as PushButton;
+            BitmapImage iconAT = LoadImage("HMVTools.Resources.annottag_32.png");
+            if (iconAT != null) btnAT.LargeImage = iconAT;
+
+            PushButtonData btnAlignSpot = new PushButtonData(
+                "AlignSpotElevations",
+                "Align Spot\nElevations",
+                path,
+                "HMVTools.AlignSpotElevationsCommand");
+            btnAlignSpot.ToolTip = "Align spot elevation text and leaders to a common line";
+            btnAlignSpot.LongDescription =
+                "Aligns the text position and leader shoulder of multiple spot "
+                + "elevations to a single X or Y coordinate.\n\n"
+                + "Features:\n"
+                + "• Align to X-Axis (vertical stack) or Y-Axis (horizontal stack)\n"
+                + "• Pick a reference line on screen or type a coordinate value\n"
+                + "• Automatically adjusts leader shoulders to prevent broken angles\n"
+                + "• Works with pre-selected spots or interactive pick";
+            PushButton btnAS = panelAnnot.AddItem(btnAlignSpot) as PushButton;
+            BitmapImage iconAS = LoadImage("HMVTools.Resources.alignspot_32.png");
+            if (iconAS != null) btnAS.LargeImage = iconAS;
 
             // ── Audit Panel ──
             RibbonPanel panelAudit = app.CreateRibbonPanel("HMV Tools", "Audit");

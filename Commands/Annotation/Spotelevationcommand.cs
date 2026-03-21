@@ -169,7 +169,7 @@ namespace HMVTools
             if (hmvStandard)
             {
                 elemRI = new ReferenceIntersector(
-                    new ElementIsElementTypeFilter(true),
+                    new ElementCategoryFilter(BuiltInCategory.OST_StructuralFoundation),
                     FindReferenceTarget.Face, view3d);
                 elemRI.FindReferencesInRevitLinks = true;
             }
@@ -237,8 +237,9 @@ namespace HMVTools
 
                         // ── NTCE: highest face on element ───────
                         var ntceHit = FindHighestFaceOnElement(
-                            elemRI, fd.BBoxMin, fd.BBoxMax,
-                            fd.LinkInstanceId, fd.ElementId);
+                        elemRI, fd.BBoxMin, fd.BBoxMax,
+                        fd.LinkInstanceId, fd.ElementId,
+                        debugInfo);
 
                         if (ntceHit != null)
                         {
@@ -781,10 +782,11 @@ namespace HMVTools
         // ════════════════════════════════════════════════════════
 
         private ReferenceWithContext FindHighestFaceOnElement(
-            ReferenceIntersector intersector,
-            XYZ bbMin, XYZ bbMax,
-            ElementId linkInstanceId,
-            ElementId elementId)
+        ReferenceIntersector intersector,
+        XYZ bbMin, XYZ bbMax,
+        ElementId linkInstanceId,
+        ElementId elementId,
+        List<string> debugInfo)
         {
             double xMin = Math.Min(bbMin.X, bbMax.X);
             double xMax = Math.Max(bbMin.X, bbMax.X);
@@ -862,9 +864,16 @@ namespace HMVTools
                         bestProximity = rwc.Proximity;
                         bestHit = rwc;
                     }
+
                 }
+
             }
 
+            debugInfo.Add(
+            $"  NTCE rays: {sampleXY.Count} fired, "
+          + $"linkId={linkInstanceId.IntegerValue}, "
+          + $"elemId={elementId.IntegerValue}, "
+          + $"bestHit={bestHit != null}");
             return bestHit;
         }
 

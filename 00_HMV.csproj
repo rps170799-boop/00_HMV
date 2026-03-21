@@ -71,15 +71,21 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="App.cs" />
+    <Compile Include="Commands\Annotation\AlignSpotElevationsCommand.cs" />
+    <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
     <Compile Include="Commands\Audit\Sheetauditcommand.cs" />
     <Compile Include="Commands\Audit\Viewauditcommand.cs" />
+    <Compile Include="Commands\DWG\Dwg3dtoshapecommand.cs" />
     <Compile Include="Commands\DWG\DwgConvertCommand.cs" />
     <Compile Include="Commands\FamilyControl\MultiParamEditorCommand.cs" />
     <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
+    <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
+    <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
     <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
     <Compile Include="WindowUI\Audit\Viewauditwindow.cs" />
+    <Compile Include="WindowUI\DWG\Dwg3dtoshapewindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
     <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
     <Compile Include="Commands\DWG\DWGToLinesCommand.cs" />
@@ -126,6 +132,15 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\multiparam_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\annottag_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\alignspot_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\dwg3d_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

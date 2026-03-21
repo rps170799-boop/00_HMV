@@ -43,6 +43,8 @@ namespace HMVTools
 
         // Data
         private List<LinkInfo> linkInfos;
+        private List<string> foundationSourceItems;
+        private List<string> floorLinkItems;
 
         /// <summary>User's settings, or null if cancelled.</summary>
         public SpotElevationSettings Settings { get; private set; }
@@ -63,7 +65,7 @@ namespace HMVTools
 
             Title = "HMV Tools – Spot Elevation on Floor";
             Width = 500;
-            Height = 480;
+            Height = 550;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(WindowBg);
@@ -91,18 +93,20 @@ namespace HMVTools
             main.Children.Add(title);
 
             // ── Row 1: Foundation source ───────────────────────────
-            var foundPanel = CreateLabeledCombo(
+            foundationSourceItems = BuildFoundationSourceItems();
+            var foundPanel = CreateSearchableCombo(
                 "Foundation source:",
-                BuildFoundationSourceItems(),
+                foundationSourceItems,
                 0,
                 out cmbFoundationSource);
             Grid.SetRow(foundPanel, 1);
             main.Children.Add(foundPanel);
 
             // ── Row 2: Floor link ──────────────────────────────────
-            var floorPanel = CreateLabeledCombo(
+            floorLinkItems = links.Select(l => l.Name).ToList();
+            var floorPanel = CreateSearchableCombo(
                 "Floor link (where floors live):",
-                links.Select(l => l.Name).ToList(),
+                floorLinkItems,
                 links.Count > 0 ? 0 : -1,
                 out cmbFloorLink);
             Grid.SetRow(floorPanel, 2);
@@ -290,12 +294,20 @@ namespace HMVTools
                 return;
             }
 
-            int foundSrcIdx = cmbFoundationSource.SelectedIndex - 1;
+            string foundText = cmbFoundationSource.SelectedItem as string;
+            int foundSrcIdx = foundText != null
+                ? foundationSourceItems.IndexOf(foundText) - 1
+                : -1;
+
+            string floorText = cmbFloorLink.SelectedItem as string;
+            int floorLinkIdx = floorText != null
+                ? floorLinkItems.IndexOf(floorText)
+                : -1;
 
             Settings = new SpotElevationSettings
             {
                 FoundationSourceIndex = foundSrcIdx,
-                FloorLinkIndex = cmbFloorLink.SelectedIndex,
+                FloorLinkIndex = floorLinkIdx,
                 LeaderOffsetMm = offset,
                 OffsetX = chkOffsetX.IsChecked == true,
                 OffsetY = chkOffsetY.IsChecked == true,
@@ -309,9 +321,9 @@ namespace HMVTools
 
         // ── Helpers ────────────────────────────────────────────────
 
-        private StackPanel CreateLabeledCombo(
+        private StackPanel CreateSearchableCombo(
             string label,
-            List<string> items,
+            List<string> allItems,
             int selectedIndex,
             out ComboBox combo)
         {
@@ -324,7 +336,47 @@ namespace HMVTools
                 Margin = new Thickness(0, 0, 0, 4)
             });
 
-            var border = new Border
+            var searchBorder = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                BorderBrush = new SolidColorBrush(BorderColor),
+                BorderThickness = new Thickness(1),
+                Background = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            var searchBox = new TextBox
+            {
+                Height = 28,
+                FontSize = 12,
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Padding = new Thickness(8, 0, 8, 0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Foreground = new SolidColorBrush(MutedText),
+                Text = "Search..."
+            };
+            searchBox.GotFocus += (s, e) =>
+            {
+                if (searchBox.Text == "Search...")
+                {
+                    searchBox.Text = "";
+                    searchBox.Foreground = new SolidColorBrush(DarkText);
+                }
+                searchBorder.BorderBrush = new SolidColorBrush(BluePrimary);
+            };
+            searchBox.LostFocus += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(searchBox.Text))
+                {
+                    searchBox.Text = "Search...";
+                    searchBox.Foreground = new SolidColorBrush(MutedText);
+                }
+                searchBorder.BorderBrush = new SolidColorBrush(BorderColor);
+            };
+            searchBorder.Child = searchBox;
+            panel.Children.Add(searchBorder);
+
+            var comboBorder = new Border
             {
                 CornerRadius = new CornerRadius(8),
                 BorderBrush = new SolidColorBrush(BorderColor),
@@ -340,14 +392,37 @@ namespace HMVTools
                 Padding = new Thickness(8, 0, 8, 0),
                 VerticalContentAlignment = VerticalAlignment.Center
             };
-            foreach (var item in items)
+            foreach (var item in allItems)
                 combo.Items.Add(item);
-            if (selectedIndex >= 0 && selectedIndex < items.Count)
+            if (selectedIndex >= 0 && selectedIndex < allItems.Count)
                 combo.SelectedIndex = selectedIndex;
 
-            border.Child = combo;
-            panel.Children.Add(border);
+            ComboBox capturedCombo = combo;
+            searchBox.TextChanged += (s, e) =>
+            {
+                string filter = searchBox.Text;
+                if (filter == "Search...") filter = "";
+                FilterCombo(capturedCombo, allItems, filter);
+            };
+
+            comboBorder.Child = combo;
+            panel.Children.Add(comboBorder);
             return panel;
+        }
+
+        private void FilterCombo(ComboBox combo, List<string> allItems, string filter)
+        {
+            string selected = combo.SelectedItem as string;
+            combo.Items.Clear();
+            var filtered = string.IsNullOrWhiteSpace(filter)
+                ? allItems
+                : allItems.Where(i => i.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+            foreach (var item in filtered)
+                combo.Items.Add(item);
+            if (selected != null && filtered.Contains(selected))
+                combo.SelectedItem = selected;
+            else if (filtered.Count == 1)
+                combo.SelectedIndex = 0;
         }
 
         private bool IsNumericInput(string newText, string currentText)
