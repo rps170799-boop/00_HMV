@@ -48,7 +48,7 @@ namespace HMVTools
         void BuildUI()
         {
             Title = "HMV Tools - 3D DWG to DirectShape";
-            Width = 480; Height = 440;
+            Width = 480; Height = 520;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(CBG);

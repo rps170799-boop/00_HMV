@@ -47,7 +47,7 @@ namespace HMVTools
         {
             Title = "HMV Tools – Align Spot Elevations";
             Width = 460;
-            Height = 420;
+            SizeToContent = SizeToContent.Height;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(WindowBg);

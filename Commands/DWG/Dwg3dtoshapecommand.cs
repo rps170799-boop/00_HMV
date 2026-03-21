@@ -19,16 +19,14 @@ namespace HMVTools
             {
                 // ── Collect candidate ImportInstances (3D only) ──
                 List<ImportInstance> allImports = new FilteredElementCollector(doc)
-                    .OfClass(typeof(ImportInstance))
-                    .Cast<ImportInstance>()
-                    .Where(ii => !ii.IsLinked)
-                    .ToList();
+                .OfClass(typeof(ImportInstance))
+                .Cast<ImportInstance>()
+                .ToList();
 
                 if (allImports.Count == 0)
                 {
                     TaskDialog.Show("HMV - 3D DWG to Shape",
-                        "No imported DWG instances found in the project.\n" +
-                        "Import (not link) a 3D DWG first.");
+                        "No imported or linked DWG instances found in the project.");
                     return Result.Cancelled;
                 }
 
@@ -36,7 +34,10 @@ namespace HMVTools
                 var configItems = allImports.Select(ii => new Dwg3DImportItem
                 {
                     Id = ii.Id,
-                    Name = (ii.Category?.Name ?? "Import") + "  [id " + ii.Id.IntegerValue + "]"
+                    Name = (ii.Category?.Name ?? "DWG")
+                 + (ii.IsLinked ? "  (Link)" : "  (Import)")
+                 + "  [id " + ii.Id.IntegerValue + "]",
+                    IsLinked = ii.IsLinked
                 }).ToList();
 
                 // Category choices (plain data, no Revit types in window)
@@ -280,6 +281,7 @@ namespace HMVTools
     {
         public ElementId Id { get; set; }
         public string Name { get; set; }
+        public bool IsLinked { get; set; }
         public override string ToString() => Name;
     }
 
