@@ -4,7 +4,6 @@ using System.Linq;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using Autodesk.Revit.UI.Selection;
 
 namespace HMVTools
 {
@@ -17,11 +16,11 @@ namespace HMVTools
             Document doc = uidoc.Document;
             try
             {
-                // ── Collect candidate ImportInstances (3D only) ──
+                // ── Collect candidate ImportInstances (imported + linked) ──
                 List<ImportInstance> allImports = new FilteredElementCollector(doc)
-                .OfClass(typeof(ImportInstance))
-                .Cast<ImportInstance>()
-                .ToList();
+                    .OfClass(typeof(ImportInstance))
+                    .Cast<ImportInstance>()
+                    .ToList();
 
                 if (allImports.Count == 0)
                 {
@@ -35,12 +34,11 @@ namespace HMVTools
                 {
                     Id = ii.Id,
                     Name = (ii.Category?.Name ?? "DWG")
-                 + (ii.IsLinked ? "  (Link)" : "  (Import)")
-                 + "  [id " + ii.Id.IntegerValue + "]",
+                         + (ii.IsLinked ? "  (Link)" : "  (Import)")
+                         + "  [id " + ii.Id.IntegerValue + "]",
                     IsLinked = ii.IsLinked
                 }).ToList();
 
-                // Category choices (plain data, no Revit types in window)
                 var catChoices = new List<Dwg3DCategoryChoice>
                 {
                     new Dwg3DCategoryChoice { Label = "Mechanical Equipment", BicInt = (int)BuiltInCategory.OST_MechanicalEquipment },
@@ -55,118 +53,200 @@ namespace HMVTools
                 if (win.ShowDialog() != true) return Result.Cancelled;
 
                 double thresholdCm3 = win.ThresholdCm3;
+                double meshBBoxMm = win.MeshBBoxMm;
+                int decimateFactor = win.DecimateFactor;
                 int selectedBic = win.SelectedCategoryBic;
                 ElementId importId = win.SelectedImportId;
                 bool deleteOriginal = win.DeleteOriginal;
                 string dsName = win.ShapeName;
 
-                // threshold: cm³ → ft³
                 double thresholdFt3 = (thresholdCm3 / 1000.0) / 0.0283168;
+                double meshBBoxFt = meshBBoxMm / 304.8;  // mm → ft
 
                 ImportInstance imp = doc.GetElement(importId) as ImportInstance;
                 if (imp == null) { message = "Selected import not found."; return Result.Failed; }
 
-                // ── Extract geometry ──
-                Options opt = new Options
+                // ══════════════════════════════════════════
+                //  PROGRESS WINDOW (modeless)
+                // ══════════════════════════════════════════
+                Dwg3DProgressWindow prog = new Dwg3DProgressWindow();
+                prog.Show();
+
+                try
                 {
-                    ComputeReferences = true,
-                    DetailLevel = ViewDetailLevel.Fine
-                };
+                    // ── Phase 1: Extract geometry ──
+                    prog.UpdatePhase("Phase 1/3 — Extracting geometry...");
+                    prog.UpdateDetail("Reading DWG geometry tree...");
+                    prog.SetIndeterminate();
 
-                GeometryElement geoElem = imp.get_Geometry(opt);
-                if (geoElem == null) { message = "No geometry found."; return Result.Failed; }
-
-                List<Solid> solids = new List<Solid>();
-                List<Mesh> meshes = new List<Mesh>();
-                int skippedSmall = 0;
-
-                ExtractGeometry(geoElem, solids, meshes, thresholdFt3, ref skippedSmall);
-
-                // ── Convert meshes → GeometryObjects via TessellatedShapeBuilder ──
-                List<GeometryObject> geoList = new List<GeometryObject>();
-                foreach (Solid s in solids) geoList.Add(s);
-
-                int meshConverted = 0;
-                int meshFailed = 0;
-                int totalTriangles = 0;
-                int degenerateSkipped = 0;
-                List<string> meshErrors = new List<string>();
-
-                foreach (Mesh m in meshes)
-                {
-                    try
+                    Options opt = new Options
                     {
-                        totalTriangles += m.NumTriangles;
-                        var result = ConvertMesh(m, out int degenCount);
-                        degenerateSkipped += degenCount;
+                        ComputeReferences = true,
+                        DetailLevel = ViewDetailLevel.Fine
+                    };
 
-                        if (result != null && result.Count > 0)
+                    GeometryElement geoElem = imp.get_Geometry(opt);
+                    if (geoElem == null)
+                    {
+                        prog.Close();
+                        message = "No geometry found.";
+                        return Result.Failed;
+                    }
+
+                    List<Solid> solids = new List<Solid>();
+                    List<Mesh> meshes = new List<Mesh>();
+                    int skippedSmall = 0;
+                    int geoCount = 0;
+
+                    ExtractGeometry(geoElem, solids, meshes, thresholdFt3,
+                                    ref skippedSmall, ref geoCount, prog);
+
+                    if (prog.IsCancelled) { prog.Close(); return Result.Cancelled; }
+
+                    prog.UpdateDetail(
+                        $"Done: {solids.Count} solids, {meshes.Count} meshes, " +
+                        $"{skippedSmall} skipped (below {thresholdCm3} cm³)");
+
+                    // ── Phase 1b: Filter meshes by bounding box ──
+                    int meshSkippedBBox = 0;
+                    if (meshBBoxFt > 0 && meshes.Count > 0)
+                    {
+                        prog.UpdatePhase("Phase 1b — Filtering small meshes...");
+                        List<Mesh> kept = new List<Mesh>();
+                        for (int i = 0; i < meshes.Count; i++)
                         {
-                            foreach (GeometryObject go in result)
-                                geoList.Add(go);
-                            meshConverted++;
+                            double diag = MeshBBoxDiagonal(meshes[i]);
+                            if (diag >= meshBBoxFt)
+                                kept.Add(meshes[i]);
+                            else
+                                meshSkippedBBox++;
                         }
-                        else
+                        prog.UpdateDetail(
+                            $"Mesh filter: {kept.Count} kept, {meshSkippedBBox} skipped " +
+                            $"(bbox < {meshBBoxMm} mm)");
+                        meshes = kept;
+                    }
+
+                    // ── Phase 2: Convert meshes ──
+                    prog.UpdatePhase($"Phase 2/3 — Converting meshes (decimate ×{decimateFactor})...");
+
+                    List<GeometryObject> geoList = new List<GeometryObject>();
+                    foreach (Solid s in solids) geoList.Add(s);
+
+                    int meshConverted = 0;
+                    int meshFailed = 0;
+                    int totalTriangles = 0;
+                    int degenerateSkipped = 0;
+                    List<string> meshErrors = new List<string>();
+
+                    if (meshes.Count > 0)
+                    {
+                        prog.SetDeterminate(meshes.Count);
+
+                        for (int mi = 0; mi < meshes.Count; mi++)
                         {
-                            meshFailed++;
-                            meshErrors.Add($"Mesh ({m.NumTriangles} tri): builder returned 0 objects");
+                            if (prog.IsCancelled) break;
+
+                            Mesh m = meshes[mi];
+                            totalTriangles += m.NumTriangles;
+
+                            prog.UpdateProgress(mi + 1, meshes.Count);
+                            prog.UpdateDetail(
+                                $"Mesh {mi + 1}/{meshes.Count}  " +
+                                $"({m.NumTriangles} triangles)  " +
+                                $"— OK: {meshConverted}, Failed: {meshFailed}");
+
+                            try
+                            {
+                                var result = ConvertMesh(m, decimateFactor, out int degenCount);
+                                degenerateSkipped += degenCount;
+
+                                if (result != null && result.Count > 0)
+                                {
+                                    foreach (GeometryObject go in result)
+                                        geoList.Add(go);
+                                    meshConverted++;
+                                }
+                                else
+                                {
+                                    meshFailed++;
+                                    meshErrors.Add($"Mesh {mi + 1} ({m.NumTriangles} tri): builder returned 0 objects");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                meshFailed++;
+                                meshErrors.Add($"Mesh {mi + 1} ({m.NumTriangles} tri): {ex.Message}");
+                            }
                         }
                     }
-                    catch (Exception ex)
+
+                    if (prog.IsCancelled) { prog.Close(); return Result.Cancelled; }
+
+                    if (geoList.Count == 0)
                     {
-                        meshFailed++;
-                        meshErrors.Add($"Mesh ({m.NumTriangles} tri): {ex.Message}");
+                        prog.Close();
+                        TaskDialog.Show("HMV - 3D DWG to Shape",
+                            "No valid geometry extracted.\n\n" +
+                            $"Solids found: {solids.Count}\n" +
+                            $"Meshes found: {meshes.Count}\n" +
+                            $"Skipped (below {thresholdCm3} cm³): {skippedSmall}\n" +
+                            $"Mesh errors: {meshFailed}");
+                        return Result.Cancelled;
+                    }
+
+                    // ── Phase 3: Create DirectShape ──
+                    prog.UpdatePhase("Phase 3/3 — Creating DirectShape...");
+                    prog.UpdateDetail($"Building shape with {geoList.Count} geometry objects...");
+                    prog.SetIndeterminate();
+
+                    ElementId catId = new ElementId((BuiltInCategory)selectedBic);
+
+                    using (Transaction tx = new Transaction(doc, "HMV - 3D DWG to DirectShape"))
+                    {
+                        tx.Start();
+
+                        DirectShape ds = DirectShape.CreateElement(doc, catId);
+                        ds.SetShape(geoList);
+                        if (!string.IsNullOrWhiteSpace(dsName))
+                            ds.SetName(dsName);
+
+                        if (deleteOriginal)
+                            doc.Delete(importId);
+
+                        tx.Commit();
+
+                        prog.Close();
+
+                        // ── Final report ──
+                        string report =
+                            $"DirectShape created  (id {ds.Id.IntegerValue})\n\n" +
+                            $"Solids kept:          {solids.Count}\n" +
+                            $"Skipped (< {thresholdCm3} cm³):  {skippedSmall}\n" +
+                            $"Meshes found:         {meshes.Count + meshSkippedBBox}\n" +
+                            $"  → bbox skipped:     {meshSkippedBBox}  (< {meshBBoxMm} mm)\n" +
+                            $"  → converted OK:     {meshConverted}\n" +
+                            $"  → failed:           {meshFailed}\n" +
+                            $"Total triangles:      {totalTriangles}\n" +
+                            $"Decimate factor:      ×{decimateFactor}\n" +
+                            $"Degenerate tri skip:  {degenerateSkipped}\n" +
+                            $"Geometry objects:     {geoList.Count}\n" +
+                            $"Original deleted:     {(deleteOriginal ? "Yes" : "No")}";
+
+                        if (meshErrors.Count > 0)
+                            report += "\n\nMesh errors:\n" +
+                                string.Join("\n", meshErrors.Take(15).Select(e => "  • " + e));
+
+                        TaskDialog td = new TaskDialog("HMV - 3D DWG to Shape");
+                        td.MainInstruction = "DirectShape created successfully.";
+                        td.MainContent = report;
+                        td.Show();
                     }
                 }
-
-                if (geoList.Count == 0)
+                catch
                 {
-                    TaskDialog.Show("HMV - 3D DWG to Shape",
-                        "No valid geometry extracted.\n\n" +
-                        $"Solids found: {solids.Count}\n" +
-                        $"Meshes found: {meshes.Count}\n" +
-                        $"Skipped (below {thresholdCm3} cm³): {skippedSmall}\n" +
-                        $"Mesh errors: {meshFailed}");
-                    return Result.Cancelled;
-                }
-
-                // ── Create DirectShape ──
-                ElementId catId = new ElementId((BuiltInCategory)selectedBic);
-
-                using (Transaction tx = new Transaction(doc, "HMV - 3D DWG to DirectShape"))
-                {
-                    tx.Start();
-
-                    DirectShape ds = DirectShape.CreateElement(doc, catId);
-                    ds.SetShape(geoList);
-                    if (!string.IsNullOrWhiteSpace(dsName))
-                        ds.SetName(dsName);
-
-                    if (deleteOriginal)
-                        doc.Delete(importId);
-
-                    tx.Commit();
-
-                    // ── Report ──
-                    string report =
-                        $"DirectShape created  (id {ds.Id.IntegerValue})\n\n" +
-                        $"Solids kept:          {solids.Count}\n" +
-                        $"Skipped (< {thresholdCm3} cm³):  {skippedSmall}\n" +
-                        $"Meshes found:         {meshes.Count}\n" +
-                        $"  → converted OK:     {meshConverted}\n" +
-                        $"  → failed:           {meshFailed}\n" +
-                        $"Total triangles:      {totalTriangles}\n" +
-                        $"Degenerate tri skip:  {degenerateSkipped}\n" +
-                        $"Geometry objects:     {geoList.Count}\n" +
-                        $"Original deleted:     {(deleteOriginal ? "Yes" : "No")}";
-
-                    if (meshErrors.Count > 0)
-                        report += "\n\nMesh errors:\n" + string.Join("\n", meshErrors.Take(10).Select(e => "  • " + e));
-
-                    TaskDialog td = new TaskDialog("HMV - 3D DWG to Shape");
-                    td.MainInstruction = "DirectShape created successfully.";
-                    td.MainContent = report;
-                    td.Show();
+                    prog.Close();
+                    throw;
                 }
 
                 return Result.Succeeded;
@@ -178,17 +258,26 @@ namespace HMVTools
         }
 
         // ══════════════════════════════════════════════════════
-        //  Recursive geometry extraction
+        //  Recursive geometry extraction (with progress)
         // ══════════════════════════════════════════════════════
         void ExtractGeometry(GeometryElement geoElem,
             List<Solid> solids, List<Mesh> meshes,
-            double thresholdFt3, ref int skipped)
+            double thresholdFt3, ref int skipped,
+            ref int geoCount, Dwg3DProgressWindow prog)
         {
             foreach (GeometryObject g in geoElem)
             {
+                if (prog.IsCancelled) return;
+
+                geoCount++;
+                if (geoCount % 50 == 0)
+                    prog.UpdateDetail(
+                        $"Scanning... {geoCount} objects  |  " +
+                        $"{solids.Count} solids, {meshes.Count} meshes, {skipped} skipped");
+
                 if (g is Solid solid)
                 {
-                    if (solid.Faces.Size == 0) continue;  // skip invalid
+                    if (solid.Faces.Size == 0) continue;
                     try
                     {
                         if (solid.Volume > thresholdFt3)
@@ -205,46 +294,43 @@ namespace HMVTools
                 }
                 else if (g is GeometryInstance gi)
                 {
-                    // GetInstanceGeometry() returns geometry in project coords
                     GeometryElement instGeo = gi.GetInstanceGeometry();
                     if (instGeo != null)
-                        ExtractGeometry(instGeo, solids, meshes, thresholdFt3, ref skipped);
+                        ExtractGeometry(instGeo, solids, meshes, thresholdFt3,
+                                        ref skipped, ref geoCount, prog);
                 }
             }
         }
 
         // ══════════════════════════════════════════════════════
-        //  Mesh → TessellatedShapeBuilder (THE FIX)
+        //  Mesh → TessellatedShapeBuilder
         //
-        //  Key differences vs the Dynamo/Python version:
+        //  Key fixes vs Dynamo/Python version:
         //  1. Target = AnyGeometry, Fallback = Mesh
-        //     (Python had no Target/Fallback → defaulted to Solid
-        //      which silently fails on open/non-watertight meshes)
-        //  2. Proper List<XYZ> instead of Python list
-        //     (CPython3 list doesn't auto-convert to IList<XYZ>)
-        //  3. Degenerate triangle filtering (zero-area faces crash builder)
+        //  2. Proper List<XYZ> for TessellatedFace
+        //  3. Degenerate triangle filtering
+        //  4. Decimation: only every Nth triangle (1 = all)
         // ══════════════════════════════════════════════════════
-        IList<GeometryObject> ConvertMesh(Mesh mesh, out int degenerateCount)
+        IList<GeometryObject> ConvertMesh(Mesh mesh, int decimateFactor, out int degenerateCount)
         {
             degenerateCount = 0;
 
             TessellatedShapeBuilder builder = new TessellatedShapeBuilder();
-
-            // ★ THIS is what was missing in the Python version ★
             builder.Target = TessellatedShapeBuilderTarget.AnyGeometry;
             builder.Fallback = TessellatedShapeBuilderFallback.Mesh;
 
-            builder.OpenConnectedFaceSet(false); // false = open shell (not solid)
+            builder.OpenConnectedFaceSet(false);
 
             int validFaces = 0;
-            for (int i = 0; i < mesh.NumTriangles; i++)
+            int step = Math.Max(1, decimateFactor);
+
+            for (int i = 0; i < mesh.NumTriangles; i += step)
             {
                 MeshTriangle tri = mesh.get_Triangle(i);
                 XYZ v0 = tri.get_Vertex(0);
                 XYZ v1 = tri.get_Vertex(1);
                 XYZ v2 = tri.get_Vertex(2);
 
-                // Skip degenerate triangles (collinear or duplicate vertices)
                 if (IsDegenerate(v0, v1, v2))
                 {
                     degenerateCount++;
@@ -268,15 +354,37 @@ namespace HMVTools
             return (geos != null && geos.Count > 0) ? geos : null;
         }
 
+        // ══════════════════════════════════════════════════════
+        //  Mesh bounding box diagonal (in ft, same as Revit internal)
+        //  Iterates vertices to find min/max XYZ, returns diagonal length
+        // ══════════════════════════════════════════════════════
+        double MeshBBoxDiagonal(Mesh mesh)
+        {
+            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+
+            IList<XYZ> verts = mesh.Vertices;
+            for (int i = 0; i < verts.Count; i++)
+            {
+                XYZ v = verts[i];
+                if (v.X < minX) minX = v.X; if (v.X > maxX) maxX = v.X;
+                if (v.Y < minY) minY = v.Y; if (v.Y > maxY) maxY = v.Y;
+                if (v.Z < minZ) minZ = v.Z; if (v.Z > maxZ) maxZ = v.Z;
+            }
+
+            double dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
         bool IsDegenerate(XYZ a, XYZ b, XYZ c)
         {
-            const double TOL = 1e-9; // ft²
+            const double TOL = 1e-9;
             XYZ cross = (b - a).CrossProduct(c - a);
             return cross.GetLength() < TOL;
         }
     }
 
-    // ── Plain data classes (no Revit references) ──
+    // ── Plain data classes ──
     public class Dwg3DImportItem
     {
         public ElementId Id { get; set; }

@@ -27,6 +27,12 @@ namespace HMVTools
             public ElementId LinkInstanceId;
         }
 
+        private class SpotPair
+        {
+            public SpotDimension Ntce;
+            public SpotDimension Nap;
+        }
+
         public Result Execute(
             ExternalCommandData commandData,
             ref string message,
@@ -153,7 +159,7 @@ namespace HMVTools
                     BBoxMin = bbMinH,
                     BBoxMax = bbMaxH,
                     Name = $"{elem.Category?.Name ?? "Element"}: "
-                                   + $"{elem.Name} (Id {elem.Id.IntegerValue})",
+                         + $"{elem.Name} (Id {elem.Id.IntegerValue})",
                     ElementId = elemId,
                     LinkInstanceId = linkInstId
                 });
@@ -165,11 +171,20 @@ namespace HMVTools
                 FindReferenceTarget.Face, view3d);
             floorRI.FindReferencesInRevitLinks = true;
 
+            // NTCE: broad multi-category to catch any element type
             ReferenceIntersector elemRI = null;
             if (hmvStandard)
             {
+                var cats = new List<BuiltInCategory>
+                {
+                    BuiltInCategory.OST_StructuralFoundation,
+                    BuiltInCategory.OST_StructuralColumns,
+                    BuiltInCategory.OST_Columns,
+                    BuiltInCategory.OST_GenericModel,
+                    BuiltInCategory.OST_StructuralFraming
+                };
                 elemRI = new ReferenceIntersector(
-                    new ElementCategoryFilter(BuiltInCategory.OST_StructuralFoundation),
+                    new ElementMulticategoryFilter(cats),
                     FindReferenceTarget.Face, view3d);
                 elemRI.FindReferencesInRevitLinks = true;
             }
@@ -179,12 +194,9 @@ namespace HMVTools
             var skipped = new List<string>();
             var debugInfo = new List<string>();
 
-            int viewScale = view.Scale;
-            double gapFeet = 2.5 * 3.5 * viewScale * MmToFeet;
-
-            // Collect placed spots for type assignment later
             var ntceSpots = new List<SpotDimension>();
             var napSpots = new List<SpotDimension>();
+            var spotPairs = new List<SpotPair>();
             var gridLineData = new List<KeyValuePair<XYZ, XYZ>>();
 
             using (Transaction tx = new Transaction(doc,
@@ -223,23 +235,19 @@ namespace HMVTools
                         ?? new XYZ(hostCenter.X, hostCenter.Y,
                             rayOrigin.Z - napHit.Proximity);
 
+                    // Common bend XY for alignment
+                    double bendX = napPoint.X + offX;
+                    double bendY = napPoint.Y + offY;
+
                     if (hmvStandard)
                     {
-                        // ── Compute NAP bend/end first (base position) ──
-                        XYZ napBend = new XYZ(
-                            napPoint.X + offX,
-                            napPoint.Y + offY,
-                            napPoint.Z);
-                        XYZ napEnd = new XYZ(
-                            napBend.X + offX * 0.5,
-                            napBend.Y,
-                            napBend.Z);
+                        var pair = new SpotPair();
 
-                        // ── NTCE: highest face on element ───────
-                        var ntceHit = FindHighestFaceOnElement(
-                        elemRI, fd.BBoxMin, fd.BBoxMax,
-                        fd.LinkInstanceId, fd.ElementId,
-                        debugInfo);
+                        // ── NTCE: highest face in bbox ──────────
+                        // Filter by LINK only, not by element ID
+                        var ntceHit = FindHighestFaceInBBox(
+                            elemRI, fd.BBoxMin, fd.BBoxMax,
+                            fd.LinkInstanceId, debugInfo);
 
                         if (ntceHit != null)
                         {
@@ -253,18 +261,9 @@ namespace HMVTools
                                     hostCenter.X, hostCenter.Y, topZ);
                             }
 
-                            // NTCE bend/end use NAP's X,Y so both
-                            // shoulder lines overlap in plan view.
-                            // NTCE type has text Above Leader,
-                            // NAP type has text Below Leader → stacked.
-                            XYZ ntceBend = new XYZ(
-                                napBend.X,
-                                napBend.Y,
-                                ntcePoint.Z);
+                            XYZ ntceBend = new XYZ(bendX, bendY, ntcePoint.Z);
                             XYZ ntceEnd = new XYZ(
-                                napEnd.X,
-                                napEnd.Y,
-                                ntcePoint.Z);
+                                bendX + offX * 0.5, bendY, ntcePoint.Z);
 
                             try
                             {
@@ -276,6 +275,7 @@ namespace HMVTools
 
                                 if (spotNtce != null)
                                 {
+                                    pair.Ntce = spotNtce;
                                     ntceSpots.Add(spotNtce);
                                     placedNtce++;
                                 }
@@ -283,7 +283,7 @@ namespace HMVTools
                             catch (Exception ex)
                             {
                                 skipped.Add(
-                                    $"{fd.Name} → NTCE error: {ex.Message}");
+                                    $"{fd.Name} → NTCE: {ex.Message}");
                             }
                         }
                         else
@@ -292,7 +292,10 @@ namespace HMVTools
                                 $"{fd.Name} → NTCE: no top face found");
                         }
 
-                        // ── NAP: leader ON, text Below Leader ────────
+                        // ── NAP ─────────────────────────────────
+                        XYZ napBend = new XYZ(bendX, bendY, napPoint.Z);
+                        XYZ napEnd = new XYZ(
+                            bendX + offX * 0.5, bendY, napPoint.Z);
 
                         try
                         {
@@ -304,18 +307,10 @@ namespace HMVTools
 
                             if (spotNap != null)
                             {
-                                XYZ nloc = (spotNap.Location as LocationPoint)?.Point;
-                                string nlocStr = nloc != null
-                                    ? $"({nloc.X:F2},{nloc.Y:F2},{nloc.Z:F2})"
-                                    : "null";
-                                debugInfo.Add(
-                                    $"NAP placed: origin=({napPoint.X:F2},{napPoint.Y:F2},{napPoint.Z:F2})"
-                                  + $" bend=({napBend.X:F2},{napBend.Y:F2})"
-                                  + $" loc={nlocStr}"
-                                  + $" HasLeader={spotNap.HasLeader}");
-
+                                pair.Nap = spotNap;
                                 napSpots.Add(spotNap);
                                 placedNap++;
+
                                 if (createGrid)
                                     gridLineData.Add(
                                         new KeyValuePair<XYZ, XYZ>(
@@ -324,21 +319,17 @@ namespace HMVTools
                         }
                         catch (Exception ex)
                         {
-                            skipped.Add(
-                                $"{fd.Name} → NAP error: {ex.Message}");
+                            skipped.Add($"{fd.Name} → NAP: {ex.Message}");
                         }
+
+                        spotPairs.Add(pair);
                     }
                     else
                     {
                         // ── Simple mode ─────────────────────────
-                        XYZ bend = new XYZ(
-                            napPoint.X + offX,
-                            napPoint.Y + offY,
-                            napPoint.Z);
+                        XYZ bend = new XYZ(bendX, bendY, napPoint.Z);
                         XYZ end = new XYZ(
-                            bend.X + offX * 0.5,
-                            bend.Y,
-                            bend.Z);
+                            bendX + offX * 0.5, bendY, napPoint.Z);
 
                         try
                         {
@@ -356,25 +347,19 @@ namespace HMVTools
                                         new KeyValuePair<XYZ, XYZ>(
                                             napPoint, end));
                             }
-                            else skipped.Add(
-                                $"{fd.Name} → returned null");
+                            else skipped.Add($"{fd.Name} → null");
                         }
                         catch (Exception ex)
-                        {
-                            skipped.Add(
-                                $"{fd.Name} → {ex.Message}");
-                        }
+                        { skipped.Add($"{fd.Name} → {ex.Message}"); }
                     }
                 }
 
                 // ════════════════════════════════════════════════
-                // PHASE 2: Create types from placed spot's type
-                // and assign to all placed spots
+                // PHASE 2: Create types + assign
                 // ════════════════════════════════════════════════
 
                 if (hmvStandard)
                 {
-                    // Get a base type from any placed spot
                     SpotDimension anySpot =
                         ntceSpots.FirstOrDefault()
                         ?? napSpots.FirstOrDefault();
@@ -391,78 +376,72 @@ namespace HMVTools
 
                         if (baseType != null)
                         {
-                            // Find or create NTCE type
-                            // (text Above Leader, white leader = invisible)
-                            ElementId ntceTypeId =
-                                FindOrCreateType(
-                                    doc, baseType,
-                                    NtceTypeName, "N.T.C.E.",
-                                    false, true,
-                                    debugInfo);
+                            ElementId ntceTypeId = FindOrCreateType(
+                                doc, baseType,
+                                NtceTypeName, "N.T.C.E.",
+                                false, true, debugInfo);
 
-                            // Find or create NAP type
-                            // (text Below Leader, black leader = visible)
-                            ElementId napTypeId =
-                                FindOrCreateType(
-                                    doc, baseType,
-                                    NapTypeName, "N.A.P.",
-                                    true, false,
-                                    debugInfo);
+                            ElementId napTypeId = FindOrCreateType(
+                                doc, baseType,
+                                NapTypeName, "N.A.P.",
+                                true, false, debugInfo);
 
                             debugInfo.Add(
-                                $"NTCE type Id: {ntceTypeId.IntegerValue}, "
-                              + $"NAP type Id: {napTypeId.IntegerValue}");
+                                $"NTCE type: {ntceTypeId.IntegerValue}, "
+                              + $"NAP type: {napTypeId.IntegerValue}");
 
-                            // Assign NTCE type
                             if (ntceTypeId != ElementId.InvalidElementId)
-                            {
                                 foreach (var s in ntceSpots)
-                                {
                                     try { s.ChangeTypeId(ntceTypeId); }
                                     catch (Exception ex)
-                                    {
-                                        debugInfo.Add(
-                                            $"NTCE ChangeTypeId: {ex.Message}");
-                                    }
-                                }
-                            }
+                                    { debugInfo.Add($"NTCE type: {ex.Message}"); }
 
-                            // Assign NAP type
                             if (napTypeId != ElementId.InvalidElementId)
-                            {
                                 foreach (var s in napSpots)
-                                {
                                     try { s.ChangeTypeId(napTypeId); }
                                     catch (Exception ex)
-                                    {
-                                        debugInfo.Add(
-                                            $"NAP ChangeTypeId: {ex.Message}");
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            debugInfo.Add(
-                                "CRITICAL: baseType is null");
+                                    { debugInfo.Add($"NAP type: {ex.Message}"); }
                         }
                     }
-                    else
+
+                    // ════════════════════════════════════════════
+                    // PHASE 2.5: Align NTCE shoulder to NAP shoulder
+                    // Using LeaderShoulderPosition from the
+                    // AlignSpotElevations discovery
+                    // ════════════════════════════════════════════
+
+                    foreach (var pair in spotPairs)
                     {
-                        debugInfo.Add(
-                            "No spots placed, skipping type creation");
+                        if (pair.Ntce == null || pair.Nap == null)
+                            continue;
+
+                        try
+                        {
+                            XYZ napShoulder = pair.Nap.LeaderShoulderPosition;
+                            if (napShoulder != null)
+                            {
+                                try
+                                {
+                                    pair.Ntce.LeaderShoulderPosition =
+                                        new XYZ(napShoulder.X,
+                                                napShoulder.Y,
+                                                napShoulder.Z);
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
                     }
                 }
 
                 // ════════════════════════════════════════════════
-                // PHASE 3: Create grids if requested
+                // PHASE 3: Grids
                 // ════════════════════════════════════════════════
 
                 if (createGrid && gridLineData.Count > 0)
                 {
                     double gridTol = 1.0 * MmToFeet;
 
-                    // Horizontal grids (X direction) – group by Y
                     if (offsetX)
                     {
                         var yGroups = GroupByCoordinate(
@@ -470,33 +449,22 @@ namespace HMVTools
                         foreach (var g in yGroups)
                         {
                             double y = g.Key;
-                            double minX = g.Value.Min(
-                                p => Math.Min(p.Key.X, p.Value.X));
-                            double maxX = g.Value.Max(
-                                p => Math.Max(p.Key.X, p.Value.X));
-                            if (Math.Abs(maxX - minX) < gridTol)
-                                continue;
+                            double minX = g.Value.Min(p => Math.Min(p.Key.X, p.Value.X));
+                            double maxX = g.Value.Max(p => Math.Max(p.Key.X, p.Value.X));
+                            if (Math.Abs(maxX - minX) < gridTol) continue;
                             try
                             {
-                                Line ln = Line.CreateBound(
-                                    new XYZ(minX, y, 0),
-                                    new XYZ(maxX, y, 0));
-                                Grid grid = Grid.Create(doc, ln);
-                                if (grid != null)
-                                {
-                                    grid.Pinned = false;
-                                    placedGrids++;
-                                }
+                                Grid grid = Grid.Create(doc,
+                                    Line.CreateBound(
+                                        new XYZ(minX, y, 0),
+                                        new XYZ(maxX, y, 0)));
+                                if (grid != null) { grid.Pinned = false; placedGrids++; }
                             }
                             catch (Exception ex)
-                            {
-                                debugInfo.Add(
-                                    $"Grid X error: {ex.Message}");
-                            }
+                            { debugInfo.Add($"Grid X: {ex.Message}"); }
                         }
                     }
 
-                    // Vertical grids (Y direction) – group by X
                     if (offsetY)
                     {
                         var xGroups = GroupByCoordinate(
@@ -504,29 +472,19 @@ namespace HMVTools
                         foreach (var g in xGroups)
                         {
                             double x = g.Key;
-                            double minY = g.Value.Min(
-                                p => Math.Min(p.Key.Y, p.Value.Y));
-                            double maxY = g.Value.Max(
-                                p => Math.Max(p.Key.Y, p.Value.Y));
-                            if (Math.Abs(maxY - minY) < gridTol)
-                                continue;
+                            double minY = g.Value.Min(p => Math.Min(p.Key.Y, p.Value.Y));
+                            double maxY = g.Value.Max(p => Math.Max(p.Key.Y, p.Value.Y));
+                            if (Math.Abs(maxY - minY) < gridTol) continue;
                             try
                             {
-                                Line ln = Line.CreateBound(
-                                    new XYZ(x, minY, 0),
-                                    new XYZ(x, maxY, 0));
-                                Grid grid = Grid.Create(doc, ln);
-                                if (grid != null)
-                                {
-                                    grid.Pinned = false;
-                                    placedGrids++;
-                                }
+                                Grid grid = Grid.Create(doc,
+                                    Line.CreateBound(
+                                        new XYZ(x, minY, 0),
+                                        new XYZ(x, maxY, 0)));
+                                if (grid != null) { grid.Pinned = false; placedGrids++; }
                             }
                             catch (Exception ex)
-                            {
-                                debugInfo.Add(
-                                    $"Grid Y error: {ex.Message}");
-                            }
+                            { debugInfo.Add($"Grid Y: {ex.Message}"); }
                         }
                     }
                 }
@@ -545,335 +503,110 @@ namespace HMVTools
             else
                 report += $"Spot elevations placed: {placedNap}\n";
 
-            if (createGrid)
-                report += $"Grids created: {placedGrids}\n";
+            if (createGrid) report += $"Grids created: {placedGrids}\n";
             report += $"Skipped: {skipped.Count}\n";
 
             if (skipped.Count > 0)
             {
                 report += "\n── SKIPPED ──\n";
-                foreach (string s in skipped)
-                    report += $"  • {s}\n";
+                foreach (string s in skipped) report += $"  • {s}\n";
             }
-
             if (debugInfo.Count > 0)
             {
                 report += "\n── DEBUG ──\n";
-                foreach (string s in debugInfo)
-                    report += $"  ▸ {s}\n";
+                foreach (string s in debugInfo) report += $"  ▸ {s}\n";
             }
 
             var td = new TaskDialog("HMV Tools – Spot Elevation");
             td.MainContent = report;
             td.Show();
-
             return Result.Succeeded;
         }
 
         // ════════════════════════════════════════════════════════
-        // Find or create HMV type by duplicating from base type
-        // (same pattern as USDTuberiaConfigCommand.FindOrCreateType)
+        // NTCE: find highest face in bbox — NO element ID filter
+        // Just filters by link ID so any category hit within the
+        // bbox from the correct link is accepted
         // ════════════════════════════════════════════════════════
 
-        private ElementId FindOrCreateType(
-            Document doc,
-            ElementType baseType,
-            string typeName,
-            string prefix,
-            bool textBelowLeader,
-            bool whiteLeader,
+        private ReferenceWithContext FindHighestFaceInBBox(
+            ReferenceIntersector intersector,
+            XYZ bbMin, XYZ bbMax,
+            ElementId linkInstanceId,
             List<string> debugInfo)
-        {
-            // Check if it already exists
-            var allTypes = new FilteredElementCollector(doc)
-                .WhereElementIsElementType()
-                .ToElements();
-
-            foreach (Element e in allTypes)
-            {
-                if (e.Name == typeName
-                    && e.GetType().Name == baseType.GetType().Name)
-                    return e.Id;
-            }
-
-            // Duplicate from base
-            try
-            {
-                ElementType newType = baseType.Duplicate(typeName);
-                if (newType == null)
-                    return ElementId.InvalidElementId;
-
-                // Text: Arial 2.5mm, no bold, opaque, width 1.0
-                TrySet(newType, BuiltInParameter.TEXT_SIZE,
-                    2.5 * MmToFeet);
-                TrySet(newType, BuiltInParameter.TEXT_FONT,
-                    "Arial");
-                TrySet(newType, BuiltInParameter.TEXT_STYLE_BOLD,
-                    0);
-                TrySet(newType, BuiltInParameter.TEXT_BACKGROUND,
-                    0);
-                TrySet(newType, BuiltInParameter.TEXT_WIDTH_SCALE,
-                    1.0);
-
-                // Text location: 0=Above Leader, 1=Below Leader
-                TrySet(newType,
-                    BuiltInParameter.SPOT_ELEV_TEXT_LOCATION,
-                    textBelowLeader ? 1 : 0);
-
-                // Display Elevations: Actual (Selected)
-                TrySet(newType,
-                    BuiltInParameter.SPOT_ELEV_DISPLAY_ELEVATIONS,
-                    0);
-
-                // ── Set parameters by name (language-independent) ──
-                bool foundIndicator = false;
-                bool foundBase = false;
-                bool foundColor = false;
-                var typeParamNames = new List<string>();
-
-                foreach (Parameter p in newType.Parameters)
-                {
-                    string pName = p.Definition?.Name;
-                    if (pName == null) continue;
-
-                    // Collect all RW string/int params for debug
-                    if (!p.IsReadOnly)
-                        typeParamNames.Add(
-                            $"{pName} ({p.StorageType})");
-
-                    if (p.IsReadOnly) continue;
-
-                    // ONLY "Elevation Indicator" — not Bottom/Top
-                    if (pName.Equals("Elevation Indicator",
-                            StringComparison.OrdinalIgnoreCase)
-                        || pName.Equals("Indicador de elevación",
-                            StringComparison.OrdinalIgnoreCase)
-                        || pName.Equals("Indicador de elevacion",
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (p.StorageType == StorageType.String)
-                        {
-                            p.Set(prefix);
-                            foundIndicator = true;
-                            debugInfo.Add(
-                                $"  '{typeName}': set '{pName}' = '{prefix}'");
-                        }
-                    }
-
-                    // Clear Bottom/Top indicators (set to empty)
-                    if (pName.IndexOf("Bottom Indicator",
-                            StringComparison.OrdinalIgnoreCase) >= 0
-                        || pName.IndexOf("Top Indicator",
-                            StringComparison.OrdinalIgnoreCase) >= 0
-                        || pName.IndexOf("Indicador inferior",
-                            StringComparison.OrdinalIgnoreCase) >= 0
-                        || pName.IndexOf("Indicador superior",
-                            StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        if (p.StorageType == StorageType.String)
-                            p.Set("");
-                    }
-
-                    // Leader color → white if whiteLeader
-                    if (whiteLeader
-                        && pName.Equals("Color",
-                                StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (p.StorageType == StorageType.Integer)
-                        {
-                            try
-                            {
-                                p.Set(16777215); // 0xFFFFFF = white
-                                foundColor = true;
-                            }
-                            catch { }
-                        }
-                    }
-
-                    // Leader Arrowhead → None for white leader
-                    if (whiteLeader
-                        && (pName.IndexOf("Leader Arrowhead",
-                                StringComparison.OrdinalIgnoreCase) >= 0
-                            || pName.IndexOf("Punta de flecha",
-                                StringComparison.OrdinalIgnoreCase) >= 0))
-                    {
-                        if (p.StorageType == StorageType.ElementId)
-                        {
-                            try { p.Set(ElementId.InvalidElementId); }
-                            catch { }
-                        }
-                        else if (p.StorageType == StorageType.Integer)
-                        {
-                            try { p.Set(0); }
-                            catch { }
-                        }
-                    }
-
-                    // Elevation Base → Survey Point
-                    // Search by name since SPOT_ELEV_BASE_PARAM
-                    // doesn't exist in Revit 2023
-                    if (pName.IndexOf("Elevation Base",
-                            StringComparison.OrdinalIgnoreCase) >= 0
-                        || pName.IndexOf("Base de elevaci",
-                            StringComparison.OrdinalIgnoreCase) >= 0
-                        || pName.IndexOf("Elevation Origin",
-                            StringComparison.OrdinalIgnoreCase) >= 0
-                        || pName.IndexOf("Origen de elevaci",
-                            StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        if (p.StorageType == StorageType.Integer)
-                        {
-                            int before = p.AsInteger();
-                            // Try each value and log for debugging
-                            // UI shows: Project Base Point, Survey Point, Relative
-                            // We need to find which integer = Survey Point
-                            // Trying 1 first based on API docs
-                            p.Set(1);
-                            int after = p.AsInteger();
-                            foundBase = true;
-                            debugInfo.Add(
-                                $"  '{typeName}': '{pName}' "
-                              + $"before={before}, set=1, after={after}");
-                        }
-                    }
-                }
-
-                // No BuiltInParameter fallback needed - name search above handles it
-
-                if (!foundIndicator)
-                    debugInfo.Add(
-                        $"  '{typeName}': NO Indicator param found. "
-                      + $"RW params: {string.Join(", ", typeParamNames)}");
-                if (!foundBase)
-                    debugInfo.Add(
-                        $"  '{typeName}': NO Base param found.");
-
-                // ── White leader color via BuiltInParameter fallback ──
-                if (whiteLeader && !foundColor)
-                {
-                    try
-                    {
-                        Parameter colorP = newType.get_Parameter(
-                            BuiltInParameter.LINE_COLOR);
-                        if (colorP != null && !colorP.IsReadOnly)
-                        {
-                            colorP.Set(16777215); // white
-                            foundColor = true;
-                        }
-                    }
-                    catch { }
-
-                    if (!foundColor)
-                        debugInfo.Add(
-                            $"  '{typeName}': Could not set white leader color");
-                }
-
-                return newType.Id;
-            }
-            catch
-            {
-                return ElementId.InvalidElementId;
-            }
-        }
-
-        // ════════════════════════════════════════════════════════
-        // Multi-ray: find HIGHEST face on element
-        // Dense grid + exact corners + small-inset corners
-        // ════════════════════════════════════════════════════════
-
-        private ReferenceWithContext FindHighestFaceOnElement(
-        ReferenceIntersector intersector,
-        XYZ bbMin, XYZ bbMax,
-        ElementId linkInstanceId,
-        ElementId elementId,
-        List<string> debugInfo)
         {
             double xMin = Math.Min(bbMin.X, bbMax.X);
             double xMax = Math.Max(bbMin.X, bbMax.X);
             double yMin = Math.Min(bbMin.Y, bbMax.Y);
             double yMax = Math.Max(bbMin.Y, bbMax.Y);
             double zTop = Math.Max(bbMin.Z, bbMax.Z);
-
             double dx = xMax - xMin;
             double dy = yMax - yMin;
 
-            var sampleXY = new List<XYZ>();
+            var samples = new List<XYZ>();
 
-            // 1) 7×7 regular grid (5% to 95%)
+            // 7×7 grid
             for (int ix = 0; ix < 7; ix++)
-            {
-                double px = xMin + dx * (0.05 + 0.9 * ix / 6.0);
                 for (int iy = 0; iy < 7; iy++)
-                {
-                    double py = yMin + dy * (0.05 + 0.9 * iy / 6.0);
-                    sampleXY.Add(new XYZ(px, py, 0));
-                }
-            }
+                    samples.Add(new XYZ(
+                        xMin + dx * (0.05 + 0.9 * ix / 6.0),
+                        yMin + dy * (0.05 + 0.9 * iy / 6.0), 0));
 
-            // 2) Exact corners (no inset — catches columns
-            //    that extend to the very edge of the bbox)
-            sampleXY.Add(new XYZ(xMin, yMin, 0));
-            sampleXY.Add(new XYZ(xMax, yMin, 0));
-            sampleXY.Add(new XYZ(xMin, yMax, 0));
-            sampleXY.Add(new XYZ(xMax, yMax, 0));
+            // Corners exact + insets
+            samples.Add(new XYZ(xMin, yMin, 0));
+            samples.Add(new XYZ(xMax, yMin, 0));
+            samples.Add(new XYZ(xMin, yMax, 0));
+            samples.Add(new XYZ(xMax, yMax, 0));
 
-            // 3) Corners with small absolute insets
-            //    (15mm, 30mm, 60mm, 100mm, 150mm in feet)
-            double[] absInsets = { 0.05, 0.1, 0.2, 0.33, 0.5 };
-            foreach (double ins in absInsets)
+            double[] ins = { 0.05, 0.1, 0.2, 0.33, 0.5 };
+            foreach (double i in ins)
             {
-                sampleXY.Add(new XYZ(xMin + ins, yMin + ins, 0));
-                sampleXY.Add(new XYZ(xMax - ins, yMin + ins, 0));
-                sampleXY.Add(new XYZ(xMin + ins, yMax - ins, 0));
-                sampleXY.Add(new XYZ(xMax - ins, yMax - ins, 0));
+                samples.Add(new XYZ(xMin + i, yMin + i, 0));
+                samples.Add(new XYZ(xMax - i, yMin + i, 0));
+                samples.Add(new XYZ(xMin + i, yMax - i, 0));
+                samples.Add(new XYZ(xMax - i, yMax - i, 0));
             }
 
-            // 4) Edge midpoints (exact + inset)
-            sampleXY.Add(new XYZ((xMin + xMax) / 2, yMin, 0));
-            sampleXY.Add(new XYZ((xMin + xMax) / 2, yMax, 0));
-            sampleXY.Add(new XYZ(xMin, (yMin + yMax) / 2, 0));
-            sampleXY.Add(new XYZ(xMax, (yMin + yMax) / 2, 0));
+            // Edge midpoints
+            samples.Add(new XYZ((xMin + xMax) / 2, yMin, 0));
+            samples.Add(new XYZ((xMin + xMax) / 2, yMax, 0));
+            samples.Add(new XYZ(xMin, (yMin + yMax) / 2, 0));
+            samples.Add(new XYZ(xMax, (yMin + yMax) / 2, 0));
 
             ReferenceWithContext bestHit = null;
-            double bestProximity = double.MaxValue;
-            XYZ direction = XYZ.BasisZ.Negate();
+            double bestProx = double.MaxValue;
+            int totalHits = 0, linkHits = 0;
 
-            foreach (XYZ xy in sampleXY)
+            foreach (XYZ xy in samples)
             {
                 XYZ origin = new XYZ(xy.X, xy.Y, zTop + 200);
-
-                IList<ReferenceWithContext> hits =
-                    intersector.Find(origin, direction);
+                var hits = intersector.Find(origin, XYZ.BasisZ.Negate());
                 if (hits == null) continue;
 
                 foreach (var rwc in hits)
                 {
+                    totalHits++;
                     Reference r = rwc.GetReference();
-                    bool match;
 
-                    if (linkInstanceId == ElementId.InvalidElementId)
-                        match = r.ElementId == elementId;
-                    else
-                        match = r.ElementId == linkInstanceId
-                             && r.LinkedElementId == elementId;
+                    // Filter by LINK only — not element ID
+                    bool match = (linkInstanceId == ElementId.InvalidElementId)
+                        || r.ElementId == linkInstanceId;
 
                     if (!match) continue;
+                    linkHits++;
 
-                    if (rwc.Proximity < bestProximity)
+                    if (rwc.Proximity < bestProx)
                     {
-                        bestProximity = rwc.Proximity;
+                        bestProx = rwc.Proximity;
                         bestHit = rwc;
                     }
-
                 }
-
             }
 
             debugInfo.Add(
-            $"  NTCE rays: {sampleXY.Count} fired, "
-          + $"linkId={linkInstanceId.IntegerValue}, "
-          + $"elemId={elementId.IntegerValue}, "
-          + $"bestHit={bestHit != null}");
+                $"  NTCE rays={samples.Count}, total={totalHits}, "
+              + $"linkMatch={linkHits}, found={bestHit != null}");
+
             return bestHit;
         }
 
@@ -894,69 +627,110 @@ namespace HMVTools
             return best;
         }
 
-        // ── Group points by coordinate for shared grid lines ────
+        // ════════════════════════════════════════════════════════
+        // Find or create HMV type
+        // ════════════════════════════════════════════════════════
+
+        private ElementId FindOrCreateType(
+            Document doc, ElementType baseType,
+            string typeName, string prefix,
+            bool textBelowLeader, bool whiteLeader,
+            List<string> debugInfo)
+        {
+            foreach (Element e in new FilteredElementCollector(doc)
+                .WhereElementIsElementType().ToElements())
+                if (e.Name == typeName
+                    && e.GetType().Name == baseType.GetType().Name)
+                    return e.Id;
+
+            try
+            {
+                ElementType nt = baseType.Duplicate(typeName);
+                if (nt == null) return ElementId.InvalidElementId;
+
+                TrySet(nt, BuiltInParameter.TEXT_SIZE, 2.5 * MmToFeet);
+                TrySet(nt, BuiltInParameter.TEXT_FONT, "Arial");
+                TrySet(nt, BuiltInParameter.TEXT_STYLE_BOLD, 0);
+                TrySet(nt, BuiltInParameter.TEXT_BACKGROUND, 0);
+                TrySet(nt, BuiltInParameter.TEXT_WIDTH_SCALE, 1.0);
+                TrySet(nt, BuiltInParameter.SPOT_ELEV_TEXT_LOCATION,
+                    textBelowLeader ? 1 : 0);
+                TrySet(nt, BuiltInParameter.SPOT_ELEV_DISPLAY_ELEVATIONS, 0);
+
+                bool fInd = false, fBase = false, fColor = false;
+
+                foreach (Parameter p in nt.Parameters)
+                {
+                    string pn = p.Definition?.Name;
+                    if (pn == null || p.IsReadOnly) continue;
+
+                    if (pn.Equals("Elevation Indicator", StringComparison.OrdinalIgnoreCase)
+                     || pn.Equals("Indicador de elevación", StringComparison.OrdinalIgnoreCase)
+                     || pn.Equals("Indicador de elevacion", StringComparison.OrdinalIgnoreCase))
+                    { if (p.StorageType == StorageType.String) { p.Set(prefix); fInd = true; } }
+
+                    if (pn.IndexOf("Bottom Indicator", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Top Indicator", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Indicador inferior", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Indicador superior", StringComparison.OrdinalIgnoreCase) >= 0)
+                    { if (p.StorageType == StorageType.String) p.Set(""); }
+
+                    if (whiteLeader && pn.Equals("Color", StringComparison.OrdinalIgnoreCase))
+                    { if (p.StorageType == StorageType.Integer) try { p.Set(16777215); fColor = true; } catch { } }
+
+                    if (whiteLeader && (pn.IndexOf("Leader Arrowhead", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Punta de flecha", StringComparison.OrdinalIgnoreCase) >= 0))
+                    { if (p.StorageType == StorageType.ElementId) try { p.Set(ElementId.InvalidElementId); } catch { } }
+
+                    if (pn.IndexOf("Elevation Base", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Base de elevaci", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Elevation Origin", StringComparison.OrdinalIgnoreCase) >= 0
+                     || pn.IndexOf("Origen de elevaci", StringComparison.OrdinalIgnoreCase) >= 0)
+                    { if (p.StorageType == StorageType.Integer) { p.Set(1); fBase = true; } }
+                }
+
+                if (whiteLeader && !fColor)
+                    try
+                    {
+                        var cp = nt.get_Parameter(BuiltInParameter.LINE_COLOR);
+                        if (cp != null && !cp.IsReadOnly) cp.Set(16777215);
+                    }
+                    catch { }
+
+                if (!fInd) debugInfo.Add($"  '{typeName}': NO Indicator");
+                if (!fBase) debugInfo.Add($"  '{typeName}': NO Base");
+
+                return nt.Id;
+            }
+            catch { return ElementId.InvalidElementId; }
+        }
+
+        // ── Grids grouping ──────────────────────────────────────
 
         private Dictionary<double, List<KeyValuePair<XYZ, XYZ>>>
             GroupByCoordinate(
                 List<KeyValuePair<XYZ, XYZ>> data,
-                Func<KeyValuePair<XYZ, XYZ>, double> selector,
-                double tolerance)
+                Func<KeyValuePair<XYZ, XYZ>, double> sel,
+                double tol)
         {
-            var groups =
-                new Dictionary<double, List<KeyValuePair<XYZ, XYZ>>>();
-            foreach (var pair in data)
+            var g = new Dictionary<double, List<KeyValuePair<XYZ, XYZ>>>();
+            foreach (var p in data)
             {
-                double val = selector(pair);
-                bool found = false;
-                foreach (double key in groups.Keys.ToList())
-                {
-                    if (Math.Abs(val - key) < tolerance)
-                    {
-                        groups[key].Add(pair);
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found)
-                    groups[val] =
-                        new List<KeyValuePair<XYZ, XYZ>> { pair };
+                double v = sel(p); bool f = false;
+                foreach (double k in g.Keys.ToList())
+                    if (Math.Abs(v - k) < tol) { g[k].Add(p); f = true; break; }
+                if (!f) g[v] = new List<KeyValuePair<XYZ, XYZ>> { p };
             }
-            return groups;
+            return g;
         }
 
-        // ── Safe parameter setters ──────────────────────────────
+        // ── Safe setters ────────────────────────────────────────
 
-        private void TrySet(Element e, BuiltInParameter bip,
-            double v)
-        {
-            try
-            {
-                Parameter p = e.get_Parameter(bip);
-                if (p != null && !p.IsReadOnly) p.Set(v);
-            }
-            catch { }
-        }
-
-        private void TrySet(Element e, BuiltInParameter bip,
-            int v)
-        {
-            try
-            {
-                Parameter p = e.get_Parameter(bip);
-                if (p != null && !p.IsReadOnly) p.Set(v);
-            }
-            catch { }
-        }
-
-        private void TrySet(Element e, BuiltInParameter bip,
-            string v)
-        {
-            try
-            {
-                Parameter p = e.get_Parameter(bip);
-                if (p != null && !p.IsReadOnly) p.Set(v);
-            }
-            catch { }
-        }
+        private void TrySet(Element e, BuiltInParameter b, double v)
+        { try { var p = e.get_Parameter(b); if (p != null && !p.IsReadOnly) p.Set(v); } catch { } }
+        private void TrySet(Element e, BuiltInParameter b, int v)
+        { try { var p = e.get_Parameter(b); if (p != null && !p.IsReadOnly) p.Set(v); } catch { } }
+        private void TrySet(Element e, BuiltInParameter b, string v)
+        { try { var p = e.get_Parameter(b); if (p != null && !p.IsReadOnly) p.Set(v); } catch { } }
     }
 }

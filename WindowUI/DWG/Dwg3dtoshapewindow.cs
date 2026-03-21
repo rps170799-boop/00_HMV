@@ -18,6 +18,8 @@ namespace HMVTools
     {
         // ── Results read by the command ──
         public double ThresholdCm3 { get; private set; } = 1.0;
+        public double MeshBBoxMm { get; private set; } = 50.0;
+        public int DecimateFactor { get; private set; } = 1;
         public int SelectedCategoryBic { get; private set; }
         public Autodesk.Revit.DB.ElementId SelectedImportId { get; private set; }
         public bool DeleteOriginal { get; private set; }
@@ -27,7 +29,7 @@ namespace HMVTools
         private readonly List<Dwg3DCategoryChoice> _categories;
 
         private ComboBox _cmbImport, _cmbCategory;
-        private TextBox _txtThreshold, _txtName;
+        private TextBox _txtThreshold, _txtName, _txtMeshBBox, _txtDecimate;
         private CheckBox _chkDelete;
 
         static readonly Color CA = Color.FromRgb(0, 120, 212);
@@ -48,7 +50,7 @@ namespace HMVTools
         void BuildUI()
         {
             Title = "HMV Tools - 3D DWG to DirectShape";
-            Width = 480; Height = 520;
+            Width = 480; Height = 580;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(CBG);
@@ -107,7 +109,6 @@ namespace HMVTools
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             root.Children.Add(row);
 
-            // Threshold
             StackPanel thSp = new StackPanel();
             thSp.Children.Add(Lbl("Volume Threshold (cm³)"));
             _txtThreshold = new TextBox
@@ -123,7 +124,6 @@ namespace HMVTools
             Grid.SetColumn(thSp, 0);
             row.Children.Add(thSp);
 
-            // Name
             StackPanel nmSp = new StackPanel();
             nmSp.Children.Add(Lbl("DirectShape Name"));
             _txtName = new TextBox
@@ -138,6 +138,49 @@ namespace HMVTools
             Grid.SetColumn(nmSp, 2);
             row.Children.Add(nmSp);
 
+            // ── Mesh filtering row ──
+            Grid row2 = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+            row2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            root.Children.Add(row2);
+
+            StackPanel bbSp = new StackPanel();
+            bbSp.Children.Add(Lbl("Mesh BBox Filter (mm)"));
+            _txtMeshBBox = new TextBox
+            {
+                Height = 30,
+                FontSize = 12,
+                Text = "50",
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Padding = new Thickness(6, 0, 6, 0),
+                ToolTip = "Meshes whose bounding box diagonal is smaller\n" +
+                          "than this value (mm) are skipped.\n" +
+                          "Set to 0 to keep all meshes."
+            };
+            bbSp.Children.Add(_txtMeshBBox);
+            Grid.SetColumn(bbSp, 0);
+            row2.Children.Add(bbSp);
+
+            StackPanel dcSp = new StackPanel();
+            dcSp.Children.Add(Lbl("Decimate (1=full, 2=50%, 3=33%)"));
+            _txtDecimate = new TextBox
+            {
+                Height = 30,
+                FontSize = 12,
+                Text = "1",
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Padding = new Thickness(6, 0, 6, 0),
+                ToolTip = "Take every Nth triangle from each mesh.\n" +
+                          "1 = all triangles (no loss)\n" +
+                          "2 = every 2nd triangle (50% faster)\n" +
+                          "3 = every 3rd triangle (66% faster)\n" +
+                          "Higher = faster but less detail."
+            };
+            dcSp.Children.Add(_txtDecimate);
+            Grid.SetColumn(dcSp, 2);
+            row2.Children.Add(dcSp);
+
             // ── Delete original checkbox ──
             _chkDelete = new CheckBox
             {
@@ -145,7 +188,7 @@ namespace HMVTools
                 FontSize = 11,
                 IsChecked = false,
                 Foreground = new SolidColorBrush(CT),
-                Margin = new Thickness(0, 0, 0, 24)
+                Margin = new Thickness(0, 0, 0, 20)
             };
             root.Children.Add(_chkDelete);
 
@@ -159,9 +202,10 @@ namespace HMVTools
             };
             infoBox.Child = new TextBlock
             {
-                Text = "Tip: The threshold filters out small solids (bolts, washers) " +
-                       "by volume. Meshes are always converted regardless of size. " +
-                       "If your DWG has only meshes, set threshold to 0.",
+                Text = "Tip: Volume threshold filters small solids. " +
+                       "Mesh BBox filters small meshes by bounding box diagonal. " +
+                       "Decimate reduces triangle count for faster conversion " +
+                       "(2 = half the triangles, good for coordination models).",
                 FontSize = 10.5,
                 Foreground = new SolidColorBrush(CA),
                 TextWrapping = TextWrapping.Wrap
@@ -191,7 +235,21 @@ namespace HMVTools
         {
             if (!double.TryParse(_txtThreshold.Text, out double th) || th < 0)
             {
-                MessageBox.Show("Enter a valid threshold (≥ 0).", "Error",
+                MessageBox.Show("Enter a valid volume threshold (≥ 0).", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!double.TryParse(_txtMeshBBox.Text, out double bb) || bb < 0)
+            {
+                MessageBox.Show("Enter a valid mesh BBox threshold (≥ 0).", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!int.TryParse(_txtDecimate.Text, out int dec) || dec < 1)
+            {
+                MessageBox.Show("Enter a valid decimate factor (≥ 1).", "Error",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -204,6 +262,8 @@ namespace HMVTools
             }
 
             ThresholdCm3 = th;
+            MeshBBoxMm = bb;
+            DecimateFactor = dec;
             SelectedCategoryBic = ((Dwg3DCategoryChoice)_cmbCategory.SelectedItem).BicInt;
             SelectedImportId = ((Dwg3DImportItem)_cmbImport.SelectedItem).Id;
             DeleteOriginal = _chkDelete.IsChecked == true;
