@@ -10,12 +10,8 @@ namespace HMVTools
 
     public class SpotAlignmentSettings
     {
-        /// <summary>True = align along X (vertical stack), False = align along Y (horizontal stack).</summary>
-        public bool AlignToX { get; set; }
-        /// <summary>True = user will pick a reference line on screen.</summary>
-        public bool PickReferenceLine { get; set; }
-        /// <summary>Typed coordinate value (feet). Only valid when PickReferenceLine is false.</summary>
-        public double TypedValue { get; set; }
+        /// <summary>True = move leader (text follows). False = move text only.</summary>
+        public bool MoveWithLeader { get; set; }
     }
 
     // ── Window ─────────────────────────────────────────────────
@@ -23,12 +19,7 @@ namespace HMVTools
     public class SpotAlignmentWindow : Window
     {
         // Controls
-        private RadioButton rbAlignX;
-        private RadioButton rbAlignY;
-        private RadioButton rbPickLine;
-        private RadioButton rbTypeValue;
-        private TextBox txtValue;
-        private Border txtValueBorder;
+        private CheckBox chkMoveLeader;
 
         // Colors (same palette as other HMV windows)
         private static readonly Color BluePrimary = Color.FromRgb(0, 120, 212);
@@ -46,20 +37,19 @@ namespace HMVTools
         public SpotAlignmentWindow(int preSelectedCount)
         {
             Title = "HMV Tools – Align Spot Elevations";
-            Width = 460;
+            Width = 420;
             SizeToContent = SizeToContent.Height;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(WindowBg);
 
             var main = new Grid { Margin = new Thickness(24) };
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // 0 Title
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // 1 Selection info
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // 2 Axis group
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // 3 Reference group
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // 4 Info
-            main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });   // 5 Spacer
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                        // 6 Buttons
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 0 Title
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 1 Selection info
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 2 Pick line + checkbox
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 3 Info
+            main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(20) }); // 4 Spacer
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 5 Buttons
 
             // ── Row 0: Title ───────────────────────────────────
             var title = new TextBlock
@@ -84,46 +74,7 @@ namespace HMVTools
             Grid.SetRow(selInfo, 1);
             main.Children.Add(selInfo);
 
-            // ── Row 2: Axis group ──────────────────────────────
-            var axisBorder = new Border
-            {
-                CornerRadius = new CornerRadius(8),
-                BorderBrush = new SolidColorBrush(BorderColor),
-                BorderThickness = new Thickness(1),
-                Background = Brushes.White,
-                Padding = new Thickness(14, 12, 14, 12),
-                Margin = new Thickness(0, 0, 0, 12)
-            };
-            var axisPanel = new StackPanel();
-            axisPanel.Children.Add(new TextBlock
-            {
-                Text = "Alignment Axis",
-                FontSize = 13,
-                FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(DarkText),
-                Margin = new Thickness(0, 0, 0, 8)
-            });
-            rbAlignX = new RadioButton
-            {
-                Content = "Align to X-Axis (Vertical Stack)",
-                FontSize = 13,
-                Foreground = new SolidColorBrush(DarkText),
-                IsChecked = true,
-                Margin = new Thickness(0, 0, 0, 6)
-            };
-            rbAlignY = new RadioButton
-            {
-                Content = "Align to Y-Axis (Horizontal Stack)",
-                FontSize = 13,
-                Foreground = new SolidColorBrush(DarkText)
-            };
-            axisPanel.Children.Add(rbAlignX);
-            axisPanel.Children.Add(rbAlignY);
-            axisBorder.Child = axisPanel;
-            Grid.SetRow(axisBorder, 2);
-            main.Children.Add(axisBorder);
-
-            // ── Row 3: Reference group ─────────────────────────
+            // ── Row 2: Pick line instruction + Move with leader ─
             var refBorder = new Border
             {
                 CornerRadius = new CornerRadius(8),
@@ -136,98 +87,55 @@ namespace HMVTools
             var refPanel = new StackPanel();
             refPanel.Children.Add(new TextBlock
             {
-                Text = "Reference Target",
+                Text = "Pick a Reference Line on screen",
                 FontSize = 13,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(DarkText),
-                Margin = new Thickness(0, 0, 0, 8)
+                Margin = new Thickness(0, 0, 0, 4)
             });
-            rbPickLine = new RadioButton
+            refPanel.Children.Add(new TextBlock
             {
-                Content = "Pick a Reference Line on screen",
+                Text = "After clicking OK, select a model or detail line.\n"
+                     + "The alignment axis is detected automatically from\n"
+                     + "the line's orientation.",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(MutedText),
+                Margin = new Thickness(0, 0, 0, 10)
+            });
+            chkMoveLeader = new CheckBox
+            {
+                Content = "Move with leader",
                 FontSize = 13,
-                GroupName = "Reference",
                 Foreground = new SolidColorBrush(DarkText),
-                IsChecked = true,
-                Margin = new Thickness(0, 0, 0, 6)
+                IsChecked = false
             };
-            rbTypeValue = new RadioButton
+            refPanel.Children.Add(chkMoveLeader);
+            refPanel.Children.Add(new TextBlock
             {
-                Content = "Type coordinate value (feet):",
-                FontSize = 13,
-                GroupName = "Reference",
-                Foreground = new SolidColorBrush(DarkText),
-                Margin = new Thickness(0, 0, 0, 6)
-            };
-
-            // Value text box (disabled until "Type coordinate" is checked)
-            txtValueBorder = new Border
-            {
-                CornerRadius = new CornerRadius(8),
-                BorderBrush = new SolidColorBrush(BorderColor),
-                BorderThickness = new Thickness(1),
-                Background = Brushes.White,
-                Width = 160,
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Margin = new Thickness(20, 0, 0, 0),
-                IsEnabled = false,
-                Opacity = 0.5
-            };
-            txtValue = new TextBox
-            {
-                Text = "0.0",
-                Height = 30,
-                FontSize = 13,
-                VerticalContentAlignment = VerticalAlignment.Center,
-                HorizontalContentAlignment = HorizontalAlignment.Center,
-                BorderThickness = new Thickness(0),
-                Background = Brushes.Transparent,
-                Padding = new Thickness(8, 0, 8, 0)
-            };
-            txtValue.PreviewTextInput += (s, e) =>
-            {
-                e.Handled = !IsNumericInput(e.Text, txtValue.Text);
-            };
-            txtValue.GotFocus += (s, e) =>
-                txtValueBorder.BorderBrush = new SolidColorBrush(BluePrimary);
-            txtValue.LostFocus += (s, e) =>
-                txtValueBorder.BorderBrush = new SolidColorBrush(BorderColor);
-            txtValueBorder.Child = txtValue;
-
-            // Toggle textbox enabled state based on radio selection
-            rbPickLine.Checked += (s, e) =>
-            {
-                txtValueBorder.IsEnabled = false;
-                txtValueBorder.Opacity = 0.5;
-            };
-            rbTypeValue.Checked += (s, e) =>
-            {
-                txtValueBorder.IsEnabled = true;
-                txtValueBorder.Opacity = 1.0;
-                txtValue.Focus();
-            };
-
-            refPanel.Children.Add(rbPickLine);
-            refPanel.Children.Add(rbTypeValue);
-            refPanel.Children.Add(txtValueBorder);
+                Text = "Unchecked: moves the text only.\n"
+                     + "Checked: moves the leader shoulder (text follows).",
+                FontSize = 11,
+                Foreground = new SolidColorBrush(MutedText),
+                Margin = new Thickness(20, 4, 0, 0)
+            });
             refBorder.Child = refPanel;
-            Grid.SetRow(refBorder, 3);
+            Grid.SetRow(refBorder, 2);
             main.Children.Add(refBorder);
 
-            // ── Row 4: Info text ───────────────────────────────
+            // ── Row 3: Info text ───────────────────────────────
             var info = new TextBlock
             {
-                Text = "Aligns the text and leader shoulder of each selected\n"
-                     + "spot elevation to a common coordinate line.",
+                Text = "Aligns selected spot elevations to a common\n"
+                     + "coordinate derived from the picked reference line.",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(MutedText),
                 TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 4, 0, 0)
+                Margin = new Thickness(0, 0, 0, 0)
             };
-            Grid.SetRow(info, 4);
+            Grid.SetRow(info, 3);
             main.Children.Add(info);
 
-            // ── Row 6: Buttons ─────────────────────────────────
+            // ── Row 5: Buttons ─────────────────────────────────
             var btnPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -238,13 +146,13 @@ namespace HMVTools
             cancelBtn.Margin = new Thickness(0, 0, 8, 0);
             cancelBtn.Click += (s, e) => { DialogResult = false; Close(); };
 
-            var okBtn = CreateButton("OK", BluePrimary, Colors.White);
-            okBtn.Width = 120;
+            var okBtn = CreateButton("OK – Pick Line", BluePrimary, Colors.White);
+            okBtn.Width = 140;
             okBtn.Click += (s, e) => Accept();
 
             btnPanel.Children.Add(cancelBtn);
             btnPanel.Children.Add(okBtn);
-            Grid.SetRow(btnPanel, 6);
+            Grid.SetRow(btnPanel, 5);
             main.Children.Add(btnPanel);
 
             Content = main;
@@ -254,42 +162,15 @@ namespace HMVTools
 
         private void Accept()
         {
-            bool pickLine = rbPickLine.IsChecked == true;
-            double typedVal = 0;
-
-            if (!pickLine)
-            {
-                if (!double.TryParse(txtValue.Text, out typedVal))
-                {
-                    MessageBox.Show("Enter a valid numeric value.",
-                        "HMV Tools", MessageBoxButton.OK);
-                    return;
-                }
-            }
-
             Settings = new SpotAlignmentSettings
             {
-                AlignToX = rbAlignX.IsChecked == true,
-                PickReferenceLine = pickLine,
-                TypedValue = typedVal
+                MoveWithLeader = chkMoveLeader.IsChecked == true
             };
-
             DialogResult = true;
             Close();
         }
 
         // ── Helpers ────────────────────────────────────────────
-
-        private bool IsNumericInput(string newText, string currentText)
-        {
-            foreach (char c in newText)
-            {
-                if (!char.IsDigit(c) && c != '.' && c != '-') return false;
-                if (c == '.' && currentText.Contains(".")) return false;
-                if (c == '-' && currentText.Length > 0) return false;
-            }
-            return true;
-        }
 
         private Button CreateButton(string text, Color bgColor, Color fgColor)
         {
