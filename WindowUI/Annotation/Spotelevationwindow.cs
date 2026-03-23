@@ -25,6 +25,7 @@ namespace HMVTools
         public bool OffsetY { get; set; }
         public bool UseHmvStandard { get; set; }
         public bool CreateGrid { get; set; }
+        public int View3DIndex { get; set; } // Added for 3D View selection
     }
 
     // ── Window ─────────────────────────────────────────────────
@@ -33,6 +34,7 @@ namespace HMVTools
     {
         private ComboBox cmbFoundationSource;
         private ComboBox cmbFloorLink;
+        private ComboBox cmbView3D; // Added 3D View Combo
         private TextBox txtLeaderOffset;
         private CheckBox chkOffsetX;
         private CheckBox chkOffsetY;
@@ -42,6 +44,7 @@ namespace HMVTools
         private List<LinkInfo> linkInfos;
         private List<string> foundationSourceItems;
         private List<string> floorLinkItems;
+        private List<string> view3DItems; // Added to store View Names
 
         public SpotElevationSettings Settings { get; private set; }
 
@@ -54,13 +57,15 @@ namespace HMVTools
         private static readonly Color WindowBg = Color.FromRgb(245, 245, 248);
         private static readonly Color AccentBg = Color.FromRgb(232, 243, 255);
 
-        public SpotElevationWindow(List<LinkInfo> links)
+        // Updated constructor to accept view names
+        public SpotElevationWindow(List<LinkInfo> links, List<string> viewNames)
         {
             linkInfos = links;
+            view3DItems = viewNames;
 
             Title = "HMV Tools – Spot Elevation on Floor";
             Width = 500;
-            Height = 540;
+            Height = 650; // Increased height to fit the new search block
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(WindowBg);
@@ -69,11 +74,12 @@ namespace HMVTools
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 0 Title
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 1 Foundation
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 2 Floor link
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 3 Offset
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 4 HMV
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 5 Info
-            main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 7 Buttons
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 3 3D View (NEW)
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 4 Offset
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 5 HMV
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 6 Info
+            main.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 7 Spacer
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 8 Buttons
 
             // ── Row 0: Title ───────────────────────────────────
             var title = new TextBlock
@@ -106,7 +112,16 @@ namespace HMVTools
             Grid.SetRow(floorPanel, 2);
             main.Children.Add(floorPanel);
 
-            // ── Row 3: Offset controls ─────────────────────────
+            // ── Row 3: 3D View Selection (searchable) ──────────
+            var viewPanel = CreateSearchableCombo(
+                "3D View context for raycasting:",
+                view3DItems,
+                view3DItems.Count > 0 ? 0 : -1,
+                out cmbView3D);
+            Grid.SetRow(viewPanel, 3);
+            main.Children.Add(viewPanel);
+
+            // ── Row 4: Offset controls ─────────────────────────
             var offsetRow = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -147,10 +162,10 @@ namespace HMVTools
             chkGrid = MakeCheckBox("Grid?", false, 16);
             offsetRow.Children.Add(chkGrid);
 
-            Grid.SetRow(offsetRow, 3);
+            Grid.SetRow(offsetRow, 4);
             main.Children.Add(offsetRow);
 
-            // ── Row 4: HMV Standard ────────────────────────────
+            // ── Row 5: HMV Standard ────────────────────────────
             var hmvBorder = new Border
             {
                 CornerRadius = new CornerRadius(8),
@@ -181,10 +196,10 @@ namespace HMVTools
                 Margin = new Thickness(20, 4, 0, 0)
             });
             hmvBorder.Child = hmvPanel;
-            Grid.SetRow(hmvBorder, 4);
+            Grid.SetRow(hmvBorder, 5);
             main.Children.Add(hmvBorder);
 
-            // ── Row 5: Info ────────────────────────────────────
+            // ── Row 6: Info ────────────────────────────────────
             var info = new TextBlock
             {
                 Text = "After clicking OK you will pick elements in the canvas.\n"
@@ -194,10 +209,10 @@ namespace HMVTools
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 0)
             };
-            Grid.SetRow(info, 5);
+            Grid.SetRow(info, 6);
             main.Children.Add(info);
 
-            // ── Row 7: Buttons ─────────────────────────────────
+            // ── Row 8: Buttons ─────────────────────────────────
             var btnPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -215,7 +230,7 @@ namespace HMVTools
 
             btnPanel.Children.Add(cancelBtn);
             btnPanel.Children.Add(okBtn);
-            Grid.SetRow(btnPanel, 7);
+            Grid.SetRow(btnPanel, 8);
             main.Children.Add(btnPanel);
 
             Content = main;
@@ -267,6 +282,18 @@ namespace HMVTools
                 return;
             }
 
+            string viewText = cmbView3D.SelectedItem as string;
+            int viewIdx = viewText != null
+                ? view3DItems.IndexOf(viewText)
+                : -1;
+
+            if (viewIdx < 0)
+            {
+                MessageBox.Show("Select a valid 3D View.",
+                    "HMV Tools", MessageBoxButton.OK);
+                return;
+            }
+
             Settings = new SpotElevationSettings
             {
                 FoundationSourceIndex = foundSrcIdx,
@@ -275,7 +302,8 @@ namespace HMVTools
                 OffsetX = chkOffsetX.IsChecked == true,
                 OffsetY = chkOffsetY.IsChecked == true,
                 UseHmvStandard = chkHmvStandard.IsChecked == true,
-                CreateGrid = chkGrid.IsChecked == true
+                CreateGrid = chkGrid.IsChecked == true,
+                View3DIndex = viewIdx // Save the index!
             };
 
             DialogResult = true;
