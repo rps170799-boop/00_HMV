@@ -25,7 +25,8 @@ namespace HMVTools
         public bool OffsetY { get; set; }
         public bool UseHmvStandard { get; set; }
         public bool CreateGrid { get; set; }
-        public int View3DIndex { get; set; } // Added for 3D View selection
+        public int View3DIndex { get; set; }
+        public bool HasShoulder { get; set; } // ADDED: Tracks the Shoulder checkbox
     }
 
     // ── Window ─────────────────────────────────────────────────
@@ -34,17 +35,18 @@ namespace HMVTools
     {
         private ComboBox cmbFoundationSource;
         private ComboBox cmbFloorLink;
-        private ComboBox cmbView3D; // Added 3D View Combo
+        private ComboBox cmbView3D;
         private TextBox txtLeaderOffset;
         private CheckBox chkOffsetX;
         private CheckBox chkOffsetY;
         private CheckBox chkGrid;
         private CheckBox chkHmvStandard;
+        private CheckBox chkShoulder; // ADDED: Shoulder checkbox
 
         private List<LinkInfo> linkInfos;
         private List<string> foundationSourceItems;
         private List<string> floorLinkItems;
-        private List<string> view3DItems; // Added to store View Names
+        private List<string> view3DItems;
 
         public SpotElevationSettings Settings { get; private set; }
 
@@ -57,7 +59,6 @@ namespace HMVTools
         private static readonly Color WindowBg = Color.FromRgb(245, 245, 248);
         private static readonly Color AccentBg = Color.FromRgb(232, 243, 255);
 
-        // Updated constructor to accept view names
         public SpotElevationWindow(List<LinkInfo> links, List<string> viewNames)
         {
             linkInfos = links;
@@ -65,7 +66,7 @@ namespace HMVTools
 
             Title = "HMV Tools – Spot Elevation on Floor";
             Width = 500;
-            Height = 650; // Increased height to fit the new search block
+            Height = 650;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(WindowBg);
@@ -74,7 +75,7 @@ namespace HMVTools
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 0 Title
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 1 Foundation
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 2 Floor link
-            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 3 3D View (NEW)
+            main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 3 3D View
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 4 Offset
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 5 HMV
             main.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });   // 6 Info
@@ -156,11 +157,15 @@ namespace HMVTools
             chkOffsetX = MakeCheckBox("X", true, 16);
             offsetRow.Children.Add(chkOffsetX);
 
-            chkOffsetY = MakeCheckBox("Y", true, 8);
+            chkOffsetY = MakeCheckBox("Y", false, 8); // Changed default to false
             offsetRow.Children.Add(chkOffsetY);
 
             chkGrid = MakeCheckBox("Grid?", false, 16);
             offsetRow.Children.Add(chkGrid);
+
+            // ADDED: Shoulder Checkbox
+            chkShoulder = MakeCheckBox("Shoulder?", true, 16);
+            offsetRow.Children.Add(chkShoulder);
 
             Grid.SetRow(offsetRow, 4);
             main.Children.Add(offsetRow);
@@ -303,7 +308,8 @@ namespace HMVTools
                 OffsetY = chkOffsetY.IsChecked == true,
                 UseHmvStandard = chkHmvStandard.IsChecked == true,
                 CreateGrid = chkGrid.IsChecked == true,
-                View3DIndex = viewIdx // Save the index!
+                View3DIndex = viewIdx,
+                HasShoulder = chkShoulder.IsChecked == true // Save the Shoulder state
             };
 
             DialogResult = true;
@@ -400,8 +406,7 @@ namespace HMVTools
             combo.Items.Clear();
             var filtered = string.IsNullOrWhiteSpace(filter)
                 ? all
-                : all.Where(i => i.IndexOf(filter,
-                    StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+                : all.Where(i => i.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
             foreach (var item in filtered) combo.Items.Add(item);
             if (selected != null && filtered.Contains(selected))
                 combo.SelectedItem = selected;
@@ -426,10 +431,8 @@ namespace HMVTools
 
         private void WireFocus(TextBox tb, Border b)
         {
-            tb.GotFocus += (s, e) =>
-                b.BorderBrush = new SolidColorBrush(BluePrimary);
-            tb.LostFocus += (s, e) =>
-                b.BorderBrush = new SolidColorBrush(BorderColor);
+            tb.GotFocus += (s, e) => b.BorderBrush = new SolidColorBrush(BluePrimary);
+            tb.LostFocus += (s, e) => b.BorderBrush = new SolidColorBrush(BorderColor);
         }
 
         private CheckBox MakeCheckBox(string text, bool isChecked, double leftMargin)
@@ -473,10 +476,8 @@ namespace HMVTools
             bd.SetValue(Border.BackgroundProperty, new SolidColorBrush(bgColor));
             bd.SetValue(Border.PaddingProperty, new Thickness(14, 6, 14, 6));
             var cp = new FrameworkElementFactory(typeof(ContentPresenter));
-            cp.SetValue(ContentPresenter.HorizontalAlignmentProperty,
-                HorizontalAlignment.Center);
-            cp.SetValue(ContentPresenter.VerticalAlignmentProperty,
-                VerticalAlignment.Center);
+            cp.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+            cp.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
             bd.AppendChild(cp);
             tmpl.VisualTree = bd;
             btn.Template = tmpl;

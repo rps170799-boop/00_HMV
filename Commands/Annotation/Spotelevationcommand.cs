@@ -82,7 +82,6 @@ namespace HMVTools
             var viewNames = valid3DViews.Select(v => v.Name).ToList();
 
             // ── Show Window ─────────────────────────────────────
-            // NOTE: This assumes you updated your SpotElevationWindow constructor!
             var win = new SpotElevationWindow(linkInfos, viewNames);
             if (win.ShowDialog() != true || win.Settings == null)
                 return Result.Cancelled;
@@ -93,6 +92,7 @@ namespace HMVTools
             bool offsetY = settings.OffsetY;
             bool hmvStandard = settings.UseHmvStandard;
             bool createGrid = settings.CreateGrid;
+            bool hasShoulder = settings.HasShoulder; // Extract shoulder boolean
 
             RevitLinkInstance floorLink = linkInstances[settings.FloorLinkIndex];
 
@@ -211,7 +211,6 @@ namespace HMVTools
             var skipped = new List<string>();
             var debugInfo = new List<string>();
 
-            // Confirm which view is actually being used in the debug output
             debugInfo.Add($"Using Selected 3D View: '{view3d.Name}'");
 
             var ntceSpots = new List<SpotDimension>();
@@ -242,28 +241,60 @@ namespace HMVTools
 
                     Reference napRef = napHit.GetReference();
                     XYZ napPoint = napRef.GlobalPoint ?? new XYZ(hostCenter.X, hostCenter.Y, rayOrigin.Z - napHit.Proximity);
-                    double bendX = napPoint.X + offX;
-                    double bendY = napPoint.Y + offY;
 
                     if (hmvStandard)
                     {
                         var pair = new SpotPair();
-
-                        // NTCE: strict foundation hit using Target Element ID
                         var ntceHit = FindHighestFaceInBBox(elemRI, fd.BBoxMin, fd.BBoxMax, fd.LinkInstanceId, fd.ElementId, debugInfo);
 
                         if (ntceHit != null)
                         {
                             Reference ntceRef = ntceHit.GetReference();
-                            XYZ ntcePoint = ntceRef.GlobalPoint;
-                            if (ntcePoint == null)
-                            {
-                                double topZ = Math.Max(fd.BBoxMax.Z, fd.BBoxMin.Z);
-                                ntcePoint = new XYZ(hostCenter.X, hostCenter.Y, topZ);
-                            }
+                            XYZ ntcePoint = ntceRef.GlobalPoint ?? new XYZ(hostCenter.X, hostCenter.Y, Math.Max(fd.BBoxMax.Z, fd.BBoxMin.Z));
 
-                            XYZ ntceBend = new XYZ(bendX, bendY, ntcePoint.Z);
-                            XYZ ntceEnd = new XYZ(bendX + offX * 0.5, bendY, ntcePoint.Z);
+                            XYZ napBend, napEnd, ntceBend, ntceEnd;
+
+                            if (hasShoulder)
+                            {
+                                // ORIGINAL LOGIC: Horizontal alignment
+                                double bendX = napPoint.X + offX;
+                                double bendY = napPoint.Y + offY;
+
+                                ntceBend = new XYZ(bendX, bendY, ntcePoint.Z);
+                                ntceEnd = new XYZ(bendX + offX * 0.5, bendY, ntcePoint.Z);
+
+                                napBend = new XYZ(bendX, bendY, napPoint.Z);
+                                napEnd = new XYZ(bendX + offX * 0.5, bendY, napPoint.Z);
+                            }
+                            else
+                            {
+                                // VERTICAL / DIAGONAL STACK LOGIC (Simulating "No Shoulder")
+                                // We make the shoulder perfectly collinear with the leader vector 
+                                // so it visually becomes one perfectly straight line.
+
+                                double gapX = 350 * MmToFeet; // Shift NTCE left
+                                double gapY = 350 * MmToFeet; // Shift NTCE up
+
+                                // 1. Set the final text destination (End point)
+                                napEnd = new XYZ(hostCenter.X + offX, hostCenter.Y + offY, napPoint.Z);
+
+                                if (offsetY && !offsetX)
+                                {
+                                    // Stack vertically, NTCE shifted left and up
+                                    ntceEnd = new XYZ(hostCenter.X + offX - gapX, hostCenter.Y + offY + gapY, ntcePoint.Z);
+                                }
+                                else
+                                {
+                                    // Default fallback
+                                    ntceEnd = new XYZ(hostCenter.X + offX + gapX, hostCenter.Y + offY + gapY, ntcePoint.Z);
+                                }
+
+                                // 2. The Hack: Place the bend exactly halfway between origin and end.
+                                // This gives the shoulder a non-zero length, but forces it to point
+                                // perfectly straight at the element, hiding the horizontal break.
+                                napBend = napPoint + (napEnd - napPoint) * 0.5;
+                                ntceBend = ntcePoint + (ntceEnd - ntcePoint) * 0.5;
+                            }
 
                             try
                             {
@@ -271,34 +302,41 @@ namespace HMVTools
                                 if (spotNtce != null) { pair.Ntce = spotNtce; ntceSpots.Add(spotNtce); placedNtce++; }
                             }
                             catch (Exception ex) { skipped.Add($"{fd.Name} → NTCE: {ex.Message}"); }
+
+                            try
+                            {
+                                SpotDimension spotNap = doc.Create.NewSpotElevation(view, napRef, napPoint, napBend, napEnd, napPoint, true);
+                                if (spotNap != null)
+                                {
+                                    pair.Nap = spotNap; napSpots.Add(spotNap); placedNap++;
+                                    if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, napEnd));
+                                }
+                            }
+                            catch (Exception ex) { skipped.Add($"{fd.Name} → NAP: {ex.Message}"); }
                         }
                         else
                         {
                             skipped.Add($"{fd.Name} → NTCE: no top face found (Total rays failed)");
                         }
 
-                        // NAP
-                        XYZ napBend = new XYZ(bendX, bendY, napPoint.Z);
-                        XYZ napEnd = new XYZ(bendX + offX * 0.5, bendY, napPoint.Z);
-
-                        try
-                        {
-                            SpotDimension spotNap = doc.Create.NewSpotElevation(view, napRef, napPoint, napBend, napEnd, napPoint, true);
-                            if (spotNap != null)
-                            {
-                                pair.Nap = spotNap; napSpots.Add(spotNap); placedNap++;
-                                if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, napEnd));
-                            }
-                        }
-                        catch (Exception ex) { skipped.Add($"{fd.Name} → NAP: {ex.Message}"); }
-
                         spotPairs.Add(pair);
                     }
                     else
                     {
                         // Simple mode
-                        XYZ bend = new XYZ(bendX, bendY, napPoint.Z);
-                        XYZ end = new XYZ(bendX + offX * 0.5, bendY, napPoint.Z);
+                        XYZ bend, end;
+                        if (hasShoulder)
+                        {
+                            bend = new XYZ(napPoint.X + offX, napPoint.Y + offY, napPoint.Z);
+                            end = new XYZ(napPoint.X + offX * 1.5, napPoint.Y + offY, napPoint.Z);
+                        }
+                        else
+                        {
+                            // Collinear Hack for simple mode too
+                            end = new XYZ(hostCenter.X + offX, hostCenter.Y + offY, napPoint.Z);
+                            bend = napPoint + (end - napPoint) * 0.5;
+                        }
+
                         try
                         {
                             SpotDimension spot = doc.Create.NewSpotElevation(view, napRef, napPoint, bend, end, napPoint, true);
@@ -334,16 +372,19 @@ namespace HMVTools
                         }
                     }
 
-                    // Align NTCE shoulder to NAP shoulder
-                    foreach (var pair in spotPairs)
+                    // Align NTCE shoulder to NAP shoulder (ONLY if HasShoulder is TRUE)
+                    if (hasShoulder)
                     {
-                        if (pair.Ntce == null || pair.Nap == null) continue;
-                        try
+                        foreach (var pair in spotPairs)
                         {
-                            XYZ napShoulder = pair.Nap.LeaderShoulderPosition;
-                            if (napShoulder != null) pair.Ntce.LeaderShoulderPosition = new XYZ(napShoulder.X, napShoulder.Y, napShoulder.Z);
+                            if (pair.Ntce == null || pair.Nap == null) continue;
+                            try
+                            {
+                                XYZ napShoulder = pair.Nap.LeaderShoulderPosition;
+                                if (napShoulder != null) pair.Ntce.LeaderShoulderPosition = new XYZ(napShoulder.X, napShoulder.Y, napShoulder.Z);
+                            }
+                            catch { }
                         }
-                        catch { }
                     }
                 }
 
@@ -496,8 +537,9 @@ namespace HMVTools
                 }
                 if (whiteLeader && !fColor) try { var cp = nt.get_Parameter(BuiltInParameter.LINE_COLOR); if (cp != null && !cp.IsReadOnly) cp.Set(16777215); } catch { }
 
-                if (!fInd) debugInfo.Add($"  '{typeName}': NO Indicator found");
-                if (!fBase) debugInfo.Add($"  '{typeName}': NO Base found");
+                if (!fInd) debugInfo.Add($"  '{typeName}': NO Indicator");
+                if (!fBase) debugInfo.Add($"  '{typeName}': NO Base");
+
                 return nt.Id;
             }
             catch { return ElementId.InvalidElementId; }

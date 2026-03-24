@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="../HMV_Revit_Installer/HMV_Revit_Installer.vdproj" Type="Installer" />
   <Project Path="00_HMV.csproj" Id="62b00a56-7a8d-43f8-b107-aa4fa7877f85" />
 </Solution>
