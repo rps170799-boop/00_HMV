@@ -197,19 +197,68 @@ namespace HMVTools
 
                     // ── Phase 3: Create DirectShape ──
                     prog.UpdatePhase("Phase 3/3 — Creating DirectShape...");
-                    prog.UpdateDetail($"Building shape with {geoList.Count} geometry objects...");
-                    prog.SetIndeterminate();
+                    prog.SetDeterminate(geoList.Count);
 
                     ElementId catId = new ElementId((BuiltInCategory)selectedBic);
+                    int geoAdded = 0;
+                    int geoRejected = 0;
 
                     using (Transaction tx = new Transaction(doc, "HMV - 3D DWG to DirectShape"))
                     {
                         tx.Start();
 
                         DirectShape ds = DirectShape.CreateElement(doc, catId);
-                        ds.SetShape(geoList);
                         if (!string.IsNullOrWhiteSpace(dsName))
                             ds.SetName(dsName);
+
+                        // Add geometry one by one — skip any that fail validation
+                        for (int gi = 0; gi < geoList.Count; gi++)
+                        {
+                            if (prog.IsCancelled) break;
+
+                            if (gi % 10 == 0)
+                            {
+                                prog.UpdateProgress(gi + 1, geoList.Count);
+                                prog.UpdateDetail(
+                                    $"Adding geometry {gi + 1}/{geoList.Count}  " +
+                                    $"— OK: {geoAdded}, Rejected: {geoRejected}");
+                            }
+
+                            try
+                            {
+                                // Pre-validate: skip zero-volume solids
+                                if (geoList[gi] is Solid sol && sol.Faces.Size == 0)
+                                {
+                                    geoRejected++;
+                                    continue;
+                                }
+
+                                ds.AppendShape(new List<GeometryObject> { geoList[gi] });
+                                geoAdded++;
+                            }
+                            catch
+                            {
+                                geoRejected++;
+                            }
+                        }
+
+                        if (prog.IsCancelled)
+                        {
+                            tx.RollBack();
+                            prog.Close();
+                            return Result.Cancelled;
+                        }
+
+                        if (geoAdded == 0)
+                        {
+                            tx.RollBack();
+                            prog.Close();
+                            TaskDialog.Show("HMV - 3D DWG to Shape",
+                                "All geometry objects were rejected by Revit.\n" +
+                                $"Total attempted: {geoList.Count}\n" +
+                                $"Rejected: {geoRejected}");
+                            return Result.Cancelled;
+                        }
 
                         if (deleteOriginal)
                             doc.Delete(importId);
@@ -230,7 +279,8 @@ namespace HMVTools
                             $"Total triangles:      {totalTriangles}\n" +
                             $"Decimate factor:      ×{decimateFactor}\n" +
                             $"Degenerate tri skip:  {degenerateSkipped}\n" +
-                            $"Geometry objects:     {geoList.Count}\n" +
+                            $"Geometry added:       {geoAdded}\n" +
+                            $"Geometry rejected:    {geoRejected}\n" +
                             $"Original deleted:     {(deleteOriginal ? "Yes" : "No")}";
 
                         if (meshErrors.Count > 0)

@@ -9,7 +9,7 @@ using Autodesk.Revit.UI;
 namespace HMVTools
 {
     [Transaction(TransactionMode.Manual)]
-    public class TextAuditCommand : IExternalCommand
+    public class DimensionAuditCommand : IExternalCommand
     {
         // ── Standards ──────────────────────────────────────────────
         private const string STD_FONT = "Arial";
@@ -21,20 +21,19 @@ namespace HMVTools
         private static readonly double[] STD_SIZES =
             { 1.5, 2.0, 2.5, 3.0, 3.5 };
 
+        // Name template:
+        // HMV_Acotado Lineal {unit}_{size}mm Arial CIV.{XX|XXX}
         private const string STD_NAME_TEMPLATE =
-            "HMV_General_{0}mm Arial";
+            "HMV_Acotado Lineal {0}_{1}mm Arial CIV.{2}";
 
         // ── Counters for unified report ────────────────────────────
         private int _typesStandardized;
         private int _instancesReassigned;
         private int _typesDeleted;
         private int _typesSkippedDeletion;
-        private int _familiesChanged;
-        private int _familiesCompliant;
         private List<string> _propertyChanges;
         private List<string> _mergeDetails;
         private List<string> _deleteDetails;
-        private List<string> _familyDetails;
         private List<string> _allErrors;
 
         // ── Entry point ────────────────────────────────────────────
@@ -52,35 +51,29 @@ namespace HMVTools
                 _instancesReassigned = 0;
                 _typesDeleted = 0;
                 _typesSkippedDeletion = 0;
-                _familiesChanged = 0;
-                _familiesCompliant = 0;
                 _propertyChanges = new List<string>();
                 _mergeDetails = new List<string>();
                 _deleteDetails = new List<string>();
-                _familyDetails = new List<string>();
                 _allErrors = new List<string>();
 
-                // ── STEP 1 ────────────────────────────────────────
-                Step01A_StandardizeAndGroup(doc,
-                    out List<double> sizeList,
-                    out List<List<int>> groupIdList,
-                    out List<int> keeperIdList);
+                // ── STEP A ──────────────────────────────────────
+                StepA_StandardizeAndGroup(doc,
+                    out List<GroupKey> groupKeys,
+                    out Dictionary<string, List<GroupItem>> groups,
+                    out Dictionary<string, GroupItem> keepers);
 
-                // ── STEP 2 ────────────────────────────────────────
-                Step01B_ReassignInstances(doc,
-                    sizeList, groupIdList, keeperIdList,
+                // ── STEP B ──────────────────────────────────────
+                StepB_ReassignInstances(doc,
+                    groupKeys, groups, keepers,
                     out List<int> typesToDelete);
 
-                // ── STEP 3 ────────────────────────────────────────
-                Step01C_DeleteEmptyTypes(doc, typesToDelete);
+                // ── STEP C ──────────────────────────────────────
+                StepC_DeleteEmptyTypes(doc, typesToDelete);
 
-                // ── STEP 4 ────────────────────────────────────────
-                Step02_StandardizeTagFamilies(doc);
-
-                // ── Build unified report ──────────────────────────
+                // ── Build unified report ────────────────────────
                 string report = BuildReport();
 
-                var window = new TextAuditReportWindow(report);
+                var window = new DimensionAuditReportWindow(report);
                 window.ShowDialog();
 
                 return Result.Succeeded;
@@ -105,7 +98,7 @@ namespace HMVTools
         {
             var sb = new StringBuilder();
 
-            sb.AppendLine("HMV TEXT AUDIT - STANDARDIZATION REPORT");
+            sb.AppendLine("HMV DIMENSION AUDIT - STANDARDIZATION REPORT");
             sb.AppendLine(new string('=', 55));
             sb.AppendLine();
 
@@ -120,10 +113,6 @@ namespace HMVTools
                 $"  Duplicate types deleted:          {_typesDeleted}");
             sb.AppendLine(
                 $"  Types skipped (still in use):     {_typesSkippedDeletion}");
-            sb.AppendLine(
-                $"  Tag families updated & reloaded:  {_familiesChanged}");
-            sb.AppendLine(
-                $"  Tag families already compliant:   {_familiesCompliant}");
             sb.AppendLine();
 
             // ── Property changes ───────────────────────────────────
@@ -158,16 +147,6 @@ namespace HMVTools
                 sb.AppendLine();
             }
 
-            // ── Tag family details ─────────────────────────────────
-            if (_familyDetails.Count > 0)
-            {
-                sb.AppendLine("TAG FAMILIES UPDATED");
-                sb.AppendLine(new string('-', 55));
-                foreach (string f in _familyDetails)
-                    sb.AppendLine(f);
-                sb.AppendLine();
-            }
-
             // ── Errors ─────────────────────────────────────────────
             if (_allErrors.Count > 0)
             {
@@ -187,37 +166,44 @@ namespace HMVTools
         }
 
         // ════════════════════════════════════════════════════════════
-        //  STEP 01A – Standardize properties + group by size
+        //  STEP A – Standardize properties + group by composite key
         // ════════════════════════════════════════════════════════════
 
-        private void Step01A_StandardizeAndGroup(Document doc,
-            out List<double> sizeList,
-            out List<List<int>> groupIdList,
-            out List<int> keeperIdList)
+        private void StepA_StandardizeAndGroup(Document doc,
+            out List<GroupKey> groupKeys,
+            out Dictionary<string, List<GroupItem>> groups,
+            out Dictionary<string, GroupItem> keepers)
         {
-            // ── Collect types ──────────────────────────────────────
-            var allTypes = new FilteredElementCollector(doc)
-                .WhereElementIsElementType()
-                .ToElements();
+            // ── Collect linear DimensionTypes ──────────────────────
+            var dimTypes = new List<DimensionType>();
 
-            var textNoteTypes = new List<Element>();
-
-            foreach (Element t in allTypes)
+            foreach (Element elem in new FilteredElementCollector(doc)
+                .OfClass(typeof(DimensionType)))
             {
-                Parameter pFont = t.get_Parameter(
+                var dt = elem as DimensionType;
+                if (dt == null) continue;
+
+                // Only linear dimensions
+                try
+                {
+                    if (dt.StyleType != DimensionStyleType.Linear)
+                        continue;
+                }
+                catch { continue; }
+
+                // Must have TEXT_FONT to be a styled dimension
+                Parameter pFont = dt.get_Parameter(
                     BuiltInParameter.TEXT_FONT);
                 if (pFont == null) continue;
 
-                string className = t.GetType().Name;
-                if (className == "TextNoteType")
-                    textNoteTypes.Add(t);
+                dimTypes.Add(dt);
             }
 
             // ── Count instances per type ───────────────────────────
             var instanceCount = new Dictionary<int, int>();
 
-            foreach (TextNote inst in new FilteredElementCollector(doc)
-                .OfClass(typeof(TextNote))
+            foreach (Dimension inst in new FilteredElementCollector(doc)
+                .OfClass(typeof(Dimension))
                 .WhereElementIsNotElementType())
             {
                 int tid = inst.GetTypeId().IntegerValue;
@@ -226,33 +212,42 @@ namespace HMVTools
                 instanceCount[tid]++;
             }
 
+            // ── Collect one sample instance per type ───────────────
+            var samplePerType = new Dictionary<int, Dimension>();
+
+            foreach (Dimension inst in new FilteredElementCollector(doc)
+                .OfClass(typeof(Dimension))
+                .WhereElementIsNotElementType())
+            {
+                int tid = inst.GetTypeId().IntegerValue;
+                if (!samplePerType.ContainsKey(tid))
+                    samplePerType[tid] = inst;
+            }
+
             // ── Standardize properties (Transaction) ───────────────
             using (var tx = new Transaction(doc,
-                "HMV Text Audit – Standardize Properties"))
+                "HMV Dim Audit – Standardize Properties"))
             {
                 tx.Start();
 
-                var allTargets = textNoteTypes.ToList();
-
-                foreach (Element t in allTargets)
+                foreach (DimensionType dt in dimTypes)
                 {
-                    string name = t.Name;
-                    int eid = t.Id.IntegerValue;
-                    string cls = t.GetType().Name;
+                    string name = dt.Name;
+                    int eid = dt.Id.IntegerValue;
                     var props = new List<string>();
 
-                    TrySet_Font(t, props);
-                    TrySet_Width(t, props);
-                    TrySet_Bold(t, props);
-                    TrySet_Background(t, props);
-                    TrySet_Size(t, props);
+                    TrySet_Font(dt, props);
+                    TrySet_Width(dt, props);
+                    TrySet_Bold(dt, props);
+                    TrySet_Background(dt, props);
+                    TrySet_Size(dt, props);
 
                     if (props.Count > 0)
                     {
                         _typesStandardized++;
                         _propertyChanges.Add(string.Format(
-                            "{0} [{1}] (ID: {2})\n   {3}",
-                            name, cls, eid,
+                            "{0} (ID: {1})\n   {2}",
+                            name, eid,
                             string.Join("\n   ", props)));
                     }
                 }
@@ -260,142 +255,137 @@ namespace HMVTools
                 tx.Commit();
             }
 
-            // ── Group TextNoteTypes by size ────────────────────────
-            var sizeGroups = new Dictionary<double, List<GroupItem>>();
-            foreach (double s in STD_SIZES)
-                sizeGroups[s] = new List<GroupItem>();
+            // ── Extract unit + decimals and build groups ───────────
+            groups = new Dictionary<string, List<GroupItem>>();
+            var keyMap = new Dictionary<string, GroupKey>();
 
-            foreach (Element t in textNoteTypes)
+            foreach (DimensionType dt in dimTypes)
             {
-                Parameter p = t.get_Parameter(
-                    BuiltInParameter.TEXT_SIZE);
-                if (p == null) continue;
+                string unitStr;
+                int decimals;
+                ExtractFormatInfo(dt, doc, samplePerType,
+                    out unitStr, out decimals);
+                double sizeMm = GetSizeMm(dt);
+                double snapped = NearestSize(sizeMm);
 
-                double sizeMm = Math.Round(
-                    p.AsDouble() * 304.8, 2);
-                double target = NearestSize(sizeMm);
+                var gk = new GroupKey
+                {
+                    UnitStr = unitStr,
+                    SizeMm = snapped,
+                    Decimals = decimals
+                };
+                string key = gk.ToKey();
+
+                if (!groups.ContainsKey(key))
+                {
+                    groups[key] = new List<GroupItem>();
+                    keyMap[key] = gk;
+                }
+
                 int count = 0;
                 instanceCount.TryGetValue(
-                    t.Id.IntegerValue, out count);
+                    dt.Id.IntegerValue, out count);
 
-                sizeGroups[target].Add(new GroupItem
+                groups[key].Add(new GroupItem
                 {
-                    Id = t.Id.IntegerValue,
-                    Name = t.Name,
+                    Id = dt.Id.IntegerValue,
+                    Name = dt.Name,
                     Count = count
                 });
             }
 
-            // ── Find keepers per size ──────────────────────────────
-            var keeperPerSize = new Dictionary<double, GroupItem>();
+            // ── Build ordered key list ─────────────────────────────
+            groupKeys = keyMap.Values.ToList();
 
-            foreach (double size in STD_SIZES)
+            // ── Find keepers per group ─────────────────────────────
+            keepers = new Dictionary<string, GroupItem>();
+
+            foreach (var kvp in groups)
             {
-                string stdName = string.Format(
-                    STD_NAME_TEMPLATE, size);
-                var group = sizeGroups[size];
+                string key = kvp.Key;
+                var group = kvp.Value;
+                var gk = keyMap[key];
+                string stdName = BuildStandardName(gk);
 
                 if (group.Count == 0)
                 {
-                    keeperPerSize[size] = null;
+                    keepers[key] = null;
                     continue;
                 }
 
+                // Prefer type already named correctly
                 GroupItem keeper = group.FirstOrDefault(
                     g => g.Name == stdName);
 
+                // Otherwise pick the one with most instances
                 if (keeper == null)
                     keeper = group.OrderByDescending(
                         g => g.Count).First();
 
-                keeperPerSize[size] = keeper;
-            }
-
-            // ── Output lists ───────────────────────────────────────
-            sizeList = new List<double>(STD_SIZES);
-            groupIdList = new List<List<int>>();
-            keeperIdList = new List<int>();
-
-            foreach (double size in STD_SIZES)
-            {
-                groupIdList.Add(
-                    sizeGroups[size].Select(g => g.Id).ToList());
-                keeperIdList.Add(
-                    keeperPerSize[size]?.Id ?? -1);
+                keepers[key] = keeper;
             }
         }
 
         // ════════════════════════════════════════════════════════════
-        //  STEP 01B – Reassign instances to keepers
+        //  STEP B – Reassign instances to keepers
         // ════════════════════════════════════════════════════════════
 
-        private void Step01B_ReassignInstances(Document doc,
-            List<double> sizes,
-            List<List<int>> groupIds,
-            List<int> keeperIds,
+        private void StepB_ReassignInstances(Document doc,
+            List<GroupKey> groupKeys,
+            Dictionary<string, List<GroupItem>> groups,
+            Dictionary<string, GroupItem> keepers,
             out List<int> typesToDelete)
         {
             typesToDelete = new List<int>();
 
             // Map type → instances
             var typeToInstances =
-                new Dictionary<int, List<TextNote>>();
+                new Dictionary<int, List<Dimension>>();
 
-            foreach (TextNote inst in
+            foreach (Dimension inst in
                 new FilteredElementCollector(doc)
-                    .OfClass(typeof(TextNote))
+                    .OfClass(typeof(Dimension))
                     .WhereElementIsNotElementType())
             {
                 int tid = inst.GetTypeId().IntegerValue;
                 if (!typeToInstances.ContainsKey(tid))
-                    typeToInstances[tid] = new List<TextNote>();
+                    typeToInstances[tid] = new List<Dimension>();
                 typeToInstances[tid].Add(inst);
             }
 
             using (var tx = new Transaction(doc,
-                "HMV Text Audit – Reassign Instances"))
+                "HMV Dim Audit – Reassign Instances"))
             {
                 tx.Start();
 
-                for (int i = 0; i < sizes.Count; i++)
+                foreach (GroupKey gk in groupKeys)
                 {
-                    double size = sizes[i];
-                    var group = groupIds[i];
-                    int keeperIdInt = keeperIds[i];
-                    string stdName = string.Format(
-                        STD_NAME_TEMPLATE, size);
+                    string key = gk.ToKey();
+                    var group = groups[key];
+                    GroupItem keeperItem = keepers[key];
+                    string stdName = BuildStandardName(gk);
 
-                    if (keeperIdInt == -1 || group.Count == 0)
+                    if (keeperItem == null || group.Count == 0)
                         continue;
 
                     // Find keeper element
-                    Element keeperElem = null;
-                    foreach (int eid in group)
-                    {
-                        Element e = doc.GetElement(
-                            new ElementId(eid));
-                        if (e != null &&
-                            e.Id.IntegerValue == keeperIdInt)
-                        {
-                            keeperElem = e;
-                            break;
-                        }
-                    }
+                    Element keeperElem = doc.GetElement(
+                        new ElementId(keeperItem.Id));
 
                     if (keeperElem == null)
                     {
                         _allErrors.Add(
-                            $"{size}mm: Keeper ID {keeperIdInt}" +
-                            " not found");
+                            $"{stdName}: Keeper ID " +
+                            $"{keeperItem.Id} not found");
                         continue;
                     }
 
                     // Check if standard name already exists
                     Element stdElem = null;
-                    foreach (int eid in group)
+                    foreach (GroupItem gi in group)
                     {
                         Element e = doc.GetElement(
-                            new ElementId(eid));
+                            new ElementId(gi.Id));
                         if (e != null && e.Name == stdName)
                         {
                             stdElem = e;
@@ -420,18 +410,18 @@ namespace HMVTools
                         {
                             try
                             {
-                                var tntKeeper =
-                                    keeperElem as TextNoteType;
-                                if (tntKeeper != null)
+                                var dtKeeper =
+                                    keeperElem as DimensionType;
+                                if (dtKeeper != null)
                                 {
-                                    var dup = tntKeeper.Duplicate(
+                                    var dup = dtKeeper.Duplicate(
                                         stdName);
                                     finalKeeper = dup;
                                 }
                                 else
                                 {
                                     _allErrors.Add(
-                                        $"{size}mm: Could not " +
+                                        $"{stdName}: Could not " +
                                         "rename or duplicate");
                                     continue;
                                 }
@@ -439,7 +429,7 @@ namespace HMVTools
                             catch (Exception ex)
                             {
                                 _allErrors.Add(
-                                    $"{size}mm: {ex.Message}");
+                                    $"{stdName}: {ex.Message}");
                                 continue;
                             }
                         }
@@ -449,17 +439,17 @@ namespace HMVTools
                     int reassigned = 0;
                     int merged = 0;
 
-                    foreach (int eid in group)
+                    foreach (GroupItem gi in group)
                     {
-                        if (eid == finalKeeperId.IntegerValue)
+                        if (gi.Id == finalKeeperId.IntegerValue)
                             continue;
 
-                        List<TextNote> instances;
+                        List<Dimension> instances;
                         if (!typeToInstances.TryGetValue(
-                            eid, out instances))
-                            instances = new List<TextNote>();
+                            gi.Id, out instances))
+                            instances = new List<Dimension>();
 
-                        foreach (TextNote inst in instances)
+                        foreach (Dimension inst in instances)
                         {
                             try
                             {
@@ -476,7 +466,7 @@ namespace HMVTools
                         }
 
                         merged++;
-                        typesToDelete.Add(eid);
+                        typesToDelete.Add(gi.Id);
                     }
 
                     _instancesReassigned += reassigned;
@@ -484,7 +474,10 @@ namespace HMVTools
                     if (merged > 0 || reassigned > 0)
                     {
                         _mergeDetails.Add(
-                            $"  {size}mm -> \"{stdName}\": " +
+                            $"  {gk.UnitStr} | " +
+                            $"{gk.SizeMm}mm | " +
+                            $"{gk.Decimals} dec " +
+                            $"-> \"{stdName}\": " +
                             $"{merged} types merged, " +
                             $"{reassigned} instances reassigned");
                     }
@@ -495,10 +488,10 @@ namespace HMVTools
         }
 
         // ════════════════════════════════════════════════════════════
-        //  STEP 01C – Delete empty types
+        //  STEP C – Delete empty types
         // ════════════════════════════════════════════════════════════
 
-        private void Step01C_DeleteEmptyTypes(Document doc,
+        private void StepC_DeleteEmptyTypes(Document doc,
             List<int> typesToDelete)
         {
             if (typesToDelete == null || typesToDelete.Count == 0)
@@ -507,9 +500,9 @@ namespace HMVTools
             // Recount instances
             var typeCount = new Dictionary<int, int>();
 
-            foreach (TextNote inst in
+            foreach (Dimension inst in
                 new FilteredElementCollector(doc)
-                    .OfClass(typeof(TextNote))
+                    .OfClass(typeof(Dimension))
                     .WhereElementIsNotElementType())
             {
                 int tid = inst.GetTypeId().IntegerValue;
@@ -519,7 +512,7 @@ namespace HMVTools
             }
 
             using (var tx = new Transaction(doc,
-                "HMV Text Audit – Delete Empty Types"))
+                "HMV Dim Audit – Delete Empty Types"))
             {
                 tx.Start();
 
@@ -567,131 +560,136 @@ namespace HMVTools
         }
 
         // ════════════════════════════════════════════════════════════
-        //  STEP 02 – Standardize annotation tag families
+        //  Unit & Decimal extraction
         // ════════════════════════════════════════════════════════════
-
-        private void Step02_StandardizeTagFamilies(Document doc)
+        /// <summary>
+        /// Reads unit (m/mm) and decimal count (2 or 3) from a
+        /// placed Dimension's ValueString. Falls back to project
+        /// units when the type has no instances.
+        /// </summary>
+        private static void ExtractFormatInfo(
+            DimensionType dt, Document doc,
+            Dictionary<int, Dimension> samplePerType,
+            out string unitStr, out int decimals)
         {
-            var annotFams = new List<Family>();
+            unitStr = "m";
+            decimals = 2;
 
-            foreach (Family f in
-                new FilteredElementCollector(doc)
-                    .OfClass(typeof(Family)))
+            Dimension sample;
+            if (samplePerType.TryGetValue(
+                dt.Id.IntegerValue, out sample))
             {
+                // Read ValueString from segment or dimension
+                string vs = null;
+
                 try
                 {
-                    if (f.FamilyCategory != null &&
-                        f.FamilyCategory.CategoryType ==
-                            CategoryType.Annotation &&
-                        !f.IsInPlace && f.IsEditable)
+                    if (sample.NumberOfSegments > 0)
                     {
-                        annotFams.Add(f);
-                    }
-                }
-                catch { /* skip */ }
-            }
-
-            var loadOpts = new TextAuditFamilyLoadOptions();
-
-            foreach (Family f in annotFams)
-            {
-                string famName = f.Name;
-
-                if (famName.Contains("Membrete") || famName.Contains("Pagina Inicio"))
-                {
-                    _familiesCompliant++;
-                    continue;
-                }
-
-                Document fDoc = null;
-                try
-                {
-                    fDoc = doc.EditFamily(f);
-                    if (fDoc == null)
-                    {
-                        _familiesCompliant++;
-                        continue;
-                    }
-
-                    var famTypes =
-                        new FilteredElementCollector(fDoc)
-                            .WhereElementIsElementType()
-                            .ToElements();
-                    var famInstances =
-                        new FilteredElementCollector(fDoc)
-                            .WhereElementIsNotElementType()
-                            .ToElements();
-
-                    var famAll = famTypes.Concat(famInstances)
-                        .ToList();
-
-                    bool hasChanges = false;
-                    int elemCount = 0;
-
-                    using (var t = new Transaction(fDoc,
-                        "Standardize All Properties"))
-                    {
-                        t.Start();
-
-                        foreach (Element et in famAll)
+                        foreach (DimensionSegment seg
+                            in sample.Segments)
                         {
-                            var typeChanges = new List<string>();
-
-                            TrySet_Font(et, typeChanges);
-                            TrySet_Bold(et, typeChanges);
-                            TrySet_Width(et, typeChanges);
-                            TrySet_Background(et, typeChanges);
-                            TrySet_Size(et, typeChanges);
-
-                            if (typeChanges.Count > 0)
-                            {
-                                hasChanges = true;
-                                elemCount++;
-                            }
-                        }
-
-                        t.Commit();
-                    }
-
-                    if (hasChanges)
-                    {
-                        try
-                        {
-                            fDoc.LoadFamily(doc, loadOpts);
-                            _familiesChanged++;
-                            _familyDetails.Add(
-                                $"  {famName}: " +
-                                $"{elemCount} elements changed");
-                        }
-                        catch (Exception ex)
-                        {
-                            _allErrors.Add(
-                                $"{famName}: reload failed" +
-                                $" - {ex.Message}");
+                            vs = seg.ValueString;
+                            if (!string.IsNullOrEmpty(vs))
+                                break;
                         }
                     }
                     else
                     {
-                        _familiesCompliant++;
+                        vs = sample.ValueString;
                     }
-
-                    fDoc.Close(false);
                 }
-                catch (Exception ex)
+                catch { /* skip */ }
+
+                if (!string.IsNullOrEmpty(vs))
                 {
-                    _allErrors.Add($"{famName}: {ex.Message}");
-                    if (fDoc != null)
+                    vs = vs.Trim();
+
+                    // ── Unit detection ──────────────────────
+                    if (vs.EndsWith("mm"))
+                        unitStr = "mm";
+                    else if (vs.EndsWith("m"))
+                        unitStr = "m";
+
+                    // ── Decimal detection ───────────────────
+                    // Strip unit suffix to isolate numeric part
+                    string numeric = vs;
+                    if (numeric.EndsWith("mm"))
+                        numeric = numeric.Substring(
+                            0, numeric.Length - 2).Trim();
+                    else if (numeric.EndsWith("m"))
+                        numeric = numeric.Substring(
+                            0, numeric.Length - 1).Trim();
+
+                    // Handle both '.' and ',' as decimal sep
+                    int dotIdx = numeric.LastIndexOf('.');
+                    if (dotIdx < 0)
+                        dotIdx = numeric.LastIndexOf(',');
+
+                    if (dotIdx >= 0)
                     {
-                        try { fDoc.Close(false); }
-                        catch { /* ignore */ }
+                        int decCount =
+                            numeric.Length - dotIdx - 1;
+                        decimals = (decCount >= 3) ? 3 : 2;
                     }
+                    else
+                    {
+                        decimals = 2;
+                    }
+                    return;
                 }
             }
+
+            // ── Fallback: project-level units ──────────────────
+            try
+            {
+                FormatOptions fo = doc.GetUnits()
+                    .GetFormatOptions(SpecTypeId.Length);
+                ForgeTypeId uid = fo.GetUnitTypeId();
+
+                if (uid == UnitTypeId.Millimeters)
+                    unitStr = "mm";
+                else
+                    unitStr = "m";
+
+                double acc = fo.Accuracy;
+                decimals = (acc > 0 && acc <= 0.005) ? 3 : 2;
+            }
+            catch
+            {
+                unitStr = "m";
+                decimals = 2;
+            }
         }
+
 
         // ════════════════════════════════════════════════════════════
         //  Helpers
         // ════════════════════════════════════════════════════════════
+
+        private static string BuildStandardName(GroupKey gk)
+        {
+            string xStr = new string('X', gk.Decimals);
+            return string.Format(STD_NAME_TEMPLATE,
+                gk.UnitStr,
+                gk.SizeMm % 1 == 0
+                    ? gk.SizeMm.ToString("0.0")
+                    : gk.SizeMm.ToString("0.0"),
+                xStr);
+        }
+
+        private static double GetSizeMm(DimensionType dt)
+        {
+            try
+            {
+                Parameter p = dt.get_Parameter(
+                    BuiltInParameter.TEXT_SIZE);
+                if (p != null)
+                    return Math.Round(p.AsDouble() * 304.8, 4);
+            }
+            catch { /* skip */ }
+            return 2.5; // safe default
+        }
 
         private static double NearestSize(double valMm)
         {
@@ -813,7 +811,19 @@ namespace HMVTools
             catch { /* skip */ }
         }
 
-        // ── Internal model ─────────────────────────────────────────
+        // ── Internal models ─────────────────────────────────────────
+
+        private class GroupKey
+        {
+            public string UnitStr { get; set; }
+            public double SizeMm { get; set; }
+            public int Decimals { get; set; }
+
+            public string ToKey()
+            {
+                return $"{UnitStr}|{SizeMm}|{Decimals}";
+            }
+        }
 
         private class GroupItem
         {

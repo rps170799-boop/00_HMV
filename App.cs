@@ -1,13 +1,62 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Windows.Media.Imaging;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Events;
 using Autodesk.Revit.UI;
 
 namespace HMVTools
 {
     public class App : IExternalApplication
     {
+        // ══════════════════════════════════════════════════════════
+        //  PROACTIVE TRACKING STATE
+        // ══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Captures the source path during FamilyLoadingIntoDocument
+        /// so it can be read in FamilyLoadedIntoDocument (which lacks
+        /// a FamilyPath property in Revit 2023).
+        /// Key = FamilyName, Value = FamilyPath.
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, string> _pendingPaths =
+            new ConcurrentDictionary<string, string>();
+
+        /// <summary>
+        /// Guard against infinite recursion: InjectVisibleParameter
+        /// reloads the family, which fires FamilyLoadedIntoDocument
+        /// again. Families in this set are currently being stamped.
+        /// </summary>
+        private static readonly HashSet<string> _stampingInProgress =
+            new HashSet<string>();
+
+        /// <summary>ExternalEvent used to defer Revit DB writes out of event handlers.</summary>
+        private static ExternalEvent _stampEvent;
+        private static StampFamilyHandler _stampHandler;
+
+        /// <summary>
+        /// Master switch: set to false to disable proactive tracking
+        /// without removing the event wiring.
+        /// </summary>
+        public static bool ProactiveTrackingEnabled { get; set; } = true;
+
+        /// <summary>
+        /// When true, the heavyweight parameter injection (EditFamily +
+        /// reload) runs on each tracked load. When false, only the
+        /// lightweight ExtensibleStorage stamp is written.
+        /// </summary>
+        public static bool InjectParameterOnLoad { get; set; } = false;
+
+        /// <summary>Reference to the recursion guard set, used by the handler.</summary>
+        internal static HashSet<string> StampingInProgress => _stampingInProgress;
+
+        // ══════════════════════════════════════════════════════════
+        //  STARTUP
+        // ══════════════════════════════════════════════════════════
+
         public Result OnStartup(UIControlledApplication app)
         {
             app.CreateRibbonTab("HMV Tools");
@@ -50,8 +99,6 @@ namespace HMVTools
             PushButton btnD3 = panelDwg.AddItem(btnDwg3D) as PushButton;
             BitmapImage iconD3 = LoadImage("HMVTools.Resources.dwg3d_32.png");
             if (iconD3 != null) btnD3.LargeImage = iconD3;
-
-
 
             // ── Family Control Tools Panel ──
             RibbonPanel panelFamily = app.CreateRibbonPanel("HMV Tools", "Family Control Tools");
@@ -239,7 +286,7 @@ namespace HMVTools
                 "Standardize Texts:\n\n"
                 + "Step 1 – Standardize Properties: normalizes Font (Arial), Width (1.0), "
                 + "Bold (No), Background (Opaque) and Size (snap to 1.5/2/2.5/3/3.5 mm) "
-                + "across all TextNoteTypes and DimensionTypes.\n\n"
+                + "across all TextNoteTypes.\n\n"
                 + "Step 2 – Merge Types: groups TextNoteTypes by size, renames the "
                 + "keeper to HMV_General_Xmm Arial and reassigns all instances.\n\n"
                 + "Step 3 – Purge: removes empty types left with no instances.\n\n"
@@ -249,6 +296,28 @@ namespace HMVTools
             PushButton btnTA = panelAudit.AddItem(btnTextAudit) as PushButton;
             BitmapImage iconTA = LoadImage("HMVTools.Resources.textaudit_32.png");
             if (iconTA != null) btnTA.LargeImage = iconTA;
+
+            // Dimension Audit button
+            PushButtonData btnDimAudit = new PushButtonData(
+                "DimAudit",
+                "Dim\nAudit",
+                path,
+                "HMVTools.DimensionAuditCommand");
+            btnDimAudit.ToolTip = "Standardize all linear dimension types to HMV naming";
+            btnDimAudit.LongDescription =
+                "Standardize Dimensions:\n\n"
+                + "Step A – Standardize Properties: normalizes Font (Arial), Width (1.0), "
+                + "Bold (No), Background (Opaque) and Size (snap to 1.5/2/2.5/3/3.5 mm) "
+                + "across all linear DimensionTypes.\n\n"
+                + "Step B – Merge Types: groups by unit (m/mm), text size, and decimal "
+                + "places (2 or 3). Renames keepers to:\n"
+                + "  HMV_Acotado Lineal [m|mm]_[size]mm Arial CIV.[XX|XXX]\n"
+                + "and reassigns all instances.\n\n"
+                + "Step C – Purge: removes empty duplicate types.\n\n"
+                + "Displays a complete report of all changes when finished.";
+            PushButton btnDA = panelAudit.AddItem(btnDimAudit) as PushButton;
+            BitmapImage iconDA = LoadImage("HMVTools.Resources.dimaudit_32.png");
+            if (iconDA != null) btnDA.LargeImage = iconDA;
 
             // View Audit button
             PushButtonData btnViewAudit = new PushButtonData(
@@ -280,13 +349,156 @@ namespace HMVTools
             BitmapImage iconSA = LoadImage("HMVTools.Resources.sheetaudit_32.png");
             if (iconSA != null) btnSA.LargeImage = iconSA;
 
+            // ── NEW: Family Audit button ──────────────────────────
+            PushButtonData btnFamilyAudit = new PushButtonData(
+                "FamilyAudit",
+                "Family\nAudit",
+                path,
+                "HMVTools.AuditFamiliesCommand");
+            btnFamilyAudit.ToolTip = "Audit family versions against ADC source files";
+            btnFamilyAudit.LongDescription =
+                "Scans all loaded editable families and compares their VersionGuid "
+                + "against the source .rfa file in the Autodesk Desktop Connector "
+                + "(ADC/ACCDocs) workspace.\n\n"
+                + "Features:\n"
+                + "• Automatic ADC file hydration for ProjFS \"Online Only\" files\n"
+                + "• Two-tier path resolution: Extensible Storage → directory search\n"
+                + "• GUID-based comparison (fast, no full document open)\n"
+                + "• SHA-256 hash for mismatched families (bit-for-bit evidence)\n"
+                + "• Colour-coded report with clipboard export\n"
+                + "• Auto-stamps families with traceability metadata";
+            PushButton btnFA = panelAudit.AddItem(btnFamilyAudit) as PushButton;
+            BitmapImage iconFA = LoadImage("HMVTools.Resources.familyaudit_32.png");
+            if (iconFA != null) btnFA.LargeImage = iconFA;
+
+            // ══════════════════════════════════════════════════════
+            //  PROACTIVE TRACKING — Event subscriptions
+            // ══════════════════════════════════════════════════════
+            //
+            // These events fire on the Revit main thread. We capture
+            // metadata here but defer all DB modifications to an
+            // ExternalEvent handler (safe Revit API context).
+            //
+            _stampHandler = new StampFamilyHandler();
+            _stampEvent = ExternalEvent.Create(_stampHandler);
+
+            app.ControlledApplication.FamilyLoadingIntoDocument +=
+                OnFamilyLoading;
+            app.ControlledApplication.FamilyLoadedIntoDocument +=
+                OnFamilyLoaded;
+
             return Result.Succeeded;
         }
 
         public Result OnShutdown(UIControlledApplication app)
         {
+            // ── Clean up event subscriptions ──────────────────────
+            try
+            {
+                app.ControlledApplication.FamilyLoadingIntoDocument -=
+                    OnFamilyLoading;
+                app.ControlledApplication.FamilyLoadedIntoDocument -=
+                    OnFamilyLoaded;
+            }
+            catch { /* Revit is shutting down — swallow gracefully */ }
+
             return Result.Succeeded;
         }
+
+        // ══════════════════════════════════════════════════════════
+        //  EVENT HANDLERS
+        // ══════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Fires BEFORE the family is loaded. Captures the source
+        /// file path so we can read it in the Loaded handler
+        /// (Revit 2023's FamilyLoadedIntoDocumentEventArgs does NOT
+        /// expose the path).
+        /// </summary>
+        private void OnFamilyLoading(object sender,
+            FamilyLoadingIntoDocumentEventArgs e)
+        {
+            if (!ProactiveTrackingEnabled) return;
+
+            try
+            {
+                string familyPath = e.FamilyPath;
+                string familyName = e.FamilyName;
+
+                if (string.IsNullOrEmpty(familyPath)
+                    || string.IsNullOrEmpty(familyName))
+                    return;
+
+                // Only track families coming from the ADC workspace
+                if (!FamilyTraceabilityManager.IsAdcPath(familyPath))
+                    return;
+
+                // Recursion guard: if we're currently reloading this
+                // family because of parameter injection, skip.
+                if (_stampingInProgress.Contains(familyName))
+                    return;
+
+                _pendingPaths[familyName] = familyPath;
+            }
+            catch { /* Never crash Revit from an event handler */ }
+        }
+
+        /// <summary>
+        /// Fires AFTER the family is loaded. Computes the SHA-256 hash
+        /// (blocking but typically fast for .rfa files) and queues
+        /// the Revit DB stamping work to the ExternalEvent handler.
+        /// </summary>
+        private void OnFamilyLoaded(object sender,
+            FamilyLoadedIntoDocumentEventArgs e)
+        {
+            if (!ProactiveTrackingEnabled) return;
+
+            try
+            {
+                // Only process successful loads (Revit 2023 does not
+                // expose FamilyLoadedStatus; a valid NewFamilyId means success)
+                if (e.NewFamilyId == null
+                    || e.NewFamilyId == ElementId.InvalidElementId)
+                    return;
+
+                string familyName = e.FamilyName;
+
+                // Recursion guard
+                if (_stampingInProgress.Contains(familyName))
+                    return;
+
+                // Retrieve the path captured in the Loading handler
+                if (!_pendingPaths.TryRemove(familyName, out string adcPath))
+                    return;
+
+                // Hydrate the file if needed (should already be hydrated
+                // since Revit just loaded it, but be safe)
+                if (!FamilyTraceabilityManager.EnsureHydrated(adcPath))
+                    return;
+
+                // Compute SHA-256 while we're still in the event.
+                // For typical .rfa files (< 20 MB) this takes < 500 ms.
+                string hash = FamilyTraceabilityManager.ComputeSha256(adcPath);
+
+                // Queue the Revit DB modifications
+                _stampHandler.Enqueue(new StampRequest
+                {
+                    FamilyName = familyName,
+                    FamilyId = e.NewFamilyId,
+                    AdcPath = adcPath,
+                    Sha256Hash = hash ?? "",
+                    Timestamp = DateTime.UtcNow.ToString("o"),
+                    UserMachineId = FamilyTraceabilityManager.GetUserMachineId(),
+                    InjectParam = InjectParameterOnLoad
+                });
+                _stampEvent.Raise();
+            }
+            catch { /* Never crash Revit from an event handler */ }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  IMAGE LOADER
+        // ══════════════════════════════════════════════════════════
 
         private BitmapImage LoadImage(string resourceName)
         {
@@ -303,5 +515,110 @@ namespace HMVTools
             }
             catch { return null; }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Data class for queued stamp operations
+    // ═══════════════════════════════════════════════════════════════
+    public class StampRequest
+    {
+        public string FamilyName { get; set; }
+        public ElementId FamilyId { get; set; }
+        public string AdcPath { get; set; }
+        public string Sha256Hash { get; set; }
+        public string Timestamp { get; set; }
+        public string UserMachineId { get; set; }
+        public bool InjectParam { get; set; }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ExternalEvent handler — all Revit DB writes happen here
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Processes queued <see cref="StampRequest"/>s in a valid Revit API
+    /// context. Writes Extensible Storage and optionally injects the
+    /// visible ADC_Library_Path parameter into each tracked family.
+    /// </summary>
+    public class StampFamilyHandler : IExternalEventHandler
+    {
+        private readonly Queue<StampRequest> _queue = new Queue<StampRequest>();
+        private readonly object _lock = new object();
+
+        public void Enqueue(StampRequest req)
+        {
+            lock (_lock) { _queue.Enqueue(req); }
+        }
+
+        public void Execute(UIApplication uiApp)
+        {
+            // Drain the queue
+            List<StampRequest> batch;
+            lock (_lock)
+            {
+                batch = new List<StampRequest>(_queue);
+                _queue.Clear();
+            }
+            if (batch.Count == 0) return;
+
+            Document doc = uiApp.ActiveUIDocument?.Document;
+            if (doc == null) return;
+
+            // ── 1. Write Extensible Storage (lightweight) ─────────
+            using (Transaction tx = new Transaction(doc,
+                "HMV - Stamp Family Traceability"))
+            {
+                tx.Start();
+                try
+                {
+                    foreach (StampRequest req in batch)
+                    {
+                        Element el = doc.GetElement(req.FamilyId);
+                        Family fam = el as Family;
+                        if (fam == null) continue;
+
+                        FamilyTraceabilityManager.WriteTraceData(fam,
+                            new TraceData
+                            {
+                                AdcPath = req.AdcPath,
+                                Sha256Hash = req.Sha256Hash,
+                                LoadTimestamp = req.Timestamp,
+                                UserMachineId = req.UserMachineId
+                            });
+                    }
+                    tx.Commit();
+                }
+                catch
+                {
+                    if (tx.HasStarted()) tx.RollBack();
+                }
+            }
+
+            // ── 2. Parameter injection (heavyweight, optional) ────
+            foreach (StampRequest req in batch)
+            {
+                if (!req.InjectParam) continue;
+
+                Element el = doc.GetElement(req.FamilyId);
+                Family fam = el as Family;
+                if (fam == null || fam.IsInPlace) continue;
+
+                // Recursion guard: mark this family so the Loading
+                // event ignores the reload triggered by EditFamily.
+                App.StampingInProgress.Add(req.FamilyName);
+                try
+                {
+                    FamilyTraceabilityManager.InjectVisibleParameter(
+                        doc, fam, req.AdcPath);
+                }
+                catch { /* Log but never crash */ }
+                finally
+                {
+                    App.StampingInProgress.Remove(req.FamilyName);
+                }
+            }
+        }
+
+        public string GetName() => "HMV Family Traceability Stamp Handler";
     }
 }
