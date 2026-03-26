@@ -19,8 +19,8 @@ namespace HMVTools
 
             try
             {
-                // Get all Revit links
-                FilteredElementCollector linkCollector = 
+                // 1. Get all Revit links
+                FilteredElementCollector linkCollector =
                     new FilteredElementCollector(doc)
                     .OfClass(typeof(RevitLinkInstance));
 
@@ -40,8 +40,20 @@ namespace HMVTools
                     return Result.Failed;
                 }
 
-                // Show UI to select link
-                TopographyToLinesWindow win = new TopographyToLinesWindow(linkNames);
+                // 2. NEW: Get all available Line Styles
+                List<string> styleNames = new List<string>();
+                Category linesCat = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
+                if (linesCat != null)
+                {
+                    foreach (Category subCat in linesCat.SubCategories)
+                    {
+                        styleNames.Add(subCat.Name);
+                    }
+                }
+                styleNames.Sort(); // Alphabetical order for the user
+
+                // Show UI and pass BOTH lists
+                TopographyToLinesWindow win = new TopographyToLinesWindow(linkNames, styleNames);
 
                 if (win.ShowDialog() != true)
                     return Result.Cancelled;
@@ -52,9 +64,15 @@ namespace HMVTools
 
                 RevitLinkInstance selectedLink = links[selectedIndex];
 
-                // Process the selected link
+                // Read user inputs from Window
+                double userOff1 = win.Offset1;
+                double userOff2 = win.Offset2;
+                double userOff3 = win.Offset3;
+                string userStyleName = win.SelectedLineStyle;
+
+                // Process the selected link and pass inputs AND the style name
                 int created = 0, skipped = 0;
-                ProcessTopography(doc, selectedLink, out created, out skipped);
+                ProcessTopography(doc, selectedLink, userOff1, userOff2, userOff3, userStyleName, out created, out skipped);
 
                 TaskDialog.Show("HMV - Topography to Lines",
                     $"Proceso completado:\n\n" +
@@ -78,6 +96,10 @@ namespace HMVTools
         private void ProcessTopography(
             Document doc,
             RevitLinkInstance link,
+            double userOffset1_m,
+            double userOffset2_m,
+            double userOffset3_m,
+            string userStyleName, // <-- New Parameter
             out int created,
             out int skipped)
         {
@@ -94,7 +116,7 @@ namespace HMVTools
             Document linkDoc = link.GetLinkDocument();
             if (linkDoc == null)
             {
-                TaskDialog.Show("Error", 
+                TaskDialog.Show("Error",
                     "No se pudo acceder al documento vinculado.");
                 return;
             }
@@ -103,7 +125,7 @@ namespace HMVTools
 
             // Collect topography meshes
             List<Mesh> meshes = new List<Mesh>();
-            FilteredElementCollector topoCollector = 
+            FilteredElementCollector topoCollector =
                 new FilteredElementCollector(linkDoc)
                 .OfCategory(BuiltInCategory.OST_Topography)
                 .WhereElementIsNotElementType();
@@ -122,21 +144,72 @@ namespace HMVTools
             }
 
             // Extract intersection segments
-            List<Tuple<XYZ, XYZ>> segments = 
+            List<Tuple<XYZ, XYZ>> rawSegments =
                 ExtractIntersectionSegments(meshes, transform, origin, viewDir);
 
+            // Merge micro-lines into fewer, longer lines
+            List<Tuple<XYZ, XYZ>> segments = MergeCollinearSegments(rawSegments);
+
+            // --- MULTIPLE OFFSET SETUP ---
+            double initialOffset_mm = 100.0; // 100 millimeters
+            double mmToFeet = 1.0 / 304.8;
+
+            // Calculate absolute distances from the base line
+            double dist1 = initialOffset_mm * mmToFeet;
+            double dist2 = dist1 + (userOffset1_m * mmToFeet);
+            double dist3 = dist2 + (userOffset2_m * mmToFeet);
+            double dist4 = dist1 + (userOffset3_m * mmToFeet);
+
+            // Create Transforms
+            XYZ dir = activeView.UpDirection;
+            Transform t1 = Transform.CreateTranslation(dir.Multiply(dist1));
+            Transform t2 = Transform.CreateTranslation(dir.Multiply(dist2));
+            Transform t3 = Transform.CreateTranslation(dir.Multiply(dist3));
+            Transform t4 = Transform.CreateTranslation(dir.Multiply(dist4));
+
             // Create detail lines
-            using (Transaction tx = new Transaction(doc, 
-                "HMV - Topography to Lines"))
+            using (Transaction tx = new Transaction(doc, "HMV - Topography Base and Offsets"))
             {
                 tx.Start();
+
+                // Get styles before the loop
+                GraphicsStyle thinStyle = GetLineStyleByName(doc, "<Thin Lines>");
+                if (thinStyle == null) thinStyle = GetLineStyleByName(doc, "<Líneas finas>"); // Fallback for Spanish Revit
+
+                GraphicsStyle userSelectedStyle = GetLineStyleByName(doc, userStyleName);
 
                 foreach (Tuple<XYZ, XYZ> seg in segments)
                 {
                     try
                     {
-                        Line line = Line.CreateBound(seg.Item1, seg.Item2);
-                        doc.Create.NewDetailCurve(activeView, line);
+                        // 0. Base Topography Line (Uses <Thin Lines>)
+                        Line baseLine = Line.CreateBound(seg.Item1, seg.Item2);
+                        DetailCurve baseCurve = doc.Create.NewDetailCurve(activeView, baseLine);
+                        if (thinStyle != null) baseCurve.LineStyle = thinStyle;
+                        created++;
+
+                        // 1. First Offset (Fixed 10 cm - Uses <Thin Lines>)
+                        Line line1 = baseLine.CreateTransformed(t1) as Line;
+                        DetailCurve dc1 = doc.Create.NewDetailCurve(activeView, line1);
+                        if (thinStyle != null) dc1.LineStyle = thinStyle;
+                        created++;
+
+                        // 2. Second Offset (10cm + User Val 1 - Uses User Selection)
+                        Line line2 = baseLine.CreateTransformed(t2) as Line;
+                        DetailCurve dc2 = doc.Create.NewDetailCurve(activeView, line2);
+                        if (userSelectedStyle != null) dc2.LineStyle = userSelectedStyle;
+                        created++;
+
+                        // 3. Third Offset (10cm + User Val 2 - Uses User Selection)
+                        Line line3 = baseLine.CreateTransformed(t3) as Line;
+                        DetailCurve dc3 = doc.Create.NewDetailCurve(activeView, line3);
+                        if (userSelectedStyle != null) dc3.LineStyle = userSelectedStyle;
+                        created++;
+
+                        // 4. Fourth Offset (10cm + User Val 3 - Uses User Selection)
+                        Line line4 = baseLine.CreateTransformed(t4) as Line;
+                        DetailCurve dc4 = doc.Create.NewDetailCurve(activeView, line4);
+                        if (userSelectedStyle != null) dc4.LineStyle = userSelectedStyle;
                         created++;
                     }
                     catch
@@ -147,6 +220,22 @@ namespace HMVTools
 
                 tx.Commit();
             }
+        }
+
+        private GraphicsStyle GetLineStyleByName(Document doc, string styleName)
+        {
+            Category linesCat = doc.Settings.Categories.get_Item(BuiltInCategory.OST_Lines);
+            if (linesCat != null)
+            {
+                foreach (Category subCat in linesCat.SubCategories)
+                {
+                    if (subCat.Name.Equals(styleName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return subCat.GetGraphicsStyle(GraphicsStyleType.Projection);
+                    }
+                }
+            }
+            return null;
         }
 
         private List<Tuple<XYZ, XYZ>> ExtractIntersectionSegments(
@@ -213,7 +302,7 @@ namespace HMVTools
                     }
 
                     // Add valid segment
-                    if (unique.Count == 2 && 
+                    if (unique.Count == 2 &&
                         unique[0].DistanceTo(unique[1]) > 1e-6)
                     {
                         segments.Add(Tuple.Create(unique[0], unique[1]));
@@ -237,6 +326,96 @@ namespace HMVTools
                 v0.X + t * (v1.X - v0.X),
                 v0.Y + t * (v1.Y - v0.Y),
                 v0.Z + t * (v1.Z - v0.Z));
+        }
+
+        private List<Tuple<XYZ, XYZ>> MergeCollinearSegments(List<Tuple<XYZ, XYZ>> inputSegments)
+        {
+            if (inputSegments == null || inputSegments.Count < 2)
+                return inputSegments;
+
+            List<Tuple<XYZ, XYZ>> result = new List<Tuple<XYZ, XYZ>>();
+            List<Tuple<XYZ, XYZ>> pool = new List<Tuple<XYZ, XYZ>>(inputSegments);
+
+            double tol = 1e-4; // Tolerance for endpoints touching
+
+            while (pool.Count > 0)
+            {
+                var current = pool[0];
+                pool.RemoveAt(0);
+
+                XYZ start = current.Item1;
+                XYZ end = current.Item2;
+
+                bool extended = true;
+                while (extended)
+                {
+                    extended = false;
+                    for (int i = 0; i < pool.Count; i++)
+                    {
+                        var candidate = pool[i];
+
+                        // Case 1: Candidate connects to our line's END point
+                        if (candidate.Item1.DistanceTo(end) < tol)
+                        {
+                            if (AreCollinear(start, end, candidate.Item2))
+                            {
+                                end = candidate.Item2; // Extend our line
+                                pool.RemoveAt(i);
+                                extended = true; break;
+                            }
+                        }
+                        else if (candidate.Item2.DistanceTo(end) < tol)
+                        {
+                            if (AreCollinear(start, end, candidate.Item1))
+                            {
+                                end = candidate.Item1; // Extend our line
+                                pool.RemoveAt(i);
+                                extended = true; break;
+                            }
+                        }
+                        // Case 2: Candidate connects to our line's START point
+                        else if (candidate.Item2.DistanceTo(start) < tol)
+                        {
+                            if (AreCollinear(candidate.Item1, start, end))
+                            {
+                                start = candidate.Item1; // Extend backwards
+                                pool.RemoveAt(i);
+                                extended = true; break;
+                            }
+                        }
+                        else if (candidate.Item1.DistanceTo(start) < tol)
+                        {
+                            if (AreCollinear(candidate.Item2, start, end))
+                            {
+                                start = candidate.Item2; // Extend backwards
+                                pool.RemoveAt(i);
+                                extended = true; break;
+                            }
+                        }
+                    }
+                }
+
+                // Only add to result if the merged line is long enough for Revit (avoiding errors)
+                if (start.DistanceTo(end) > 0.005)
+                {
+                    result.Add(new Tuple<XYZ, XYZ>(start, end));
+                }
+            }
+
+            return result;
+        }
+
+        private bool AreCollinear(XYZ p1, XYZ p2, XYZ p3)
+        {
+            if (p1.DistanceTo(p2) < 1e-5 || p2.DistanceTo(p3) < 1e-5) return true;
+
+            XYZ v1 = (p2 - p1).Normalize();
+            XYZ v2 = (p3 - p2).Normalize();
+
+            // Checks if the lines are pointing in the same direction.
+            // 0.999 gives a ~2.5 degree angle tolerance so gently sloping terrain
+            // also gets smoothed into longer lines.
+            return v1.DotProduct(v2) > 0.99999;
         }
     }
 }

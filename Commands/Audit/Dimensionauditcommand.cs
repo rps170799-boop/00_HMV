@@ -31,6 +31,7 @@ namespace HMVTools
         private int _instancesReassigned;
         private int _typesDeleted;
         private int _typesSkippedDeletion;
+        private int _instancesSkippedGroup;
         private List<string> _propertyChanges;
         private List<string> _mergeDetails;
         private List<string> _deleteDetails;
@@ -51,6 +52,7 @@ namespace HMVTools
                 _instancesReassigned = 0;
                 _typesDeleted = 0;
                 _typesSkippedDeletion = 0;
+                _instancesSkippedGroup = 0;
                 _propertyChanges = new List<string>();
                 _mergeDetails = new List<string>();
                 _deleteDetails = new List<string>();
@@ -109,6 +111,8 @@ namespace HMVTools
                 $"  Types standardized (properties):  {_typesStandardized}");
             sb.AppendLine(
                 $"  Instances reassigned to keepers:  {_instancesReassigned}");
+            sb.AppendLine(
+                $"  Instances skipped (in groups):    {_instancesSkippedGroup}");
             sb.AppendLine(
                 $"  Duplicate types deleted:          {_typesDeleted}");
             sb.AppendLine(
@@ -265,11 +269,13 @@ namespace HMVTools
                 int decimals;
                 ExtractFormatInfo(dt, doc, samplePerType,
                     out unitStr, out decimals);
+
                 double sizeMm = GetSizeMm(dt);
                 double snapped = NearestSize(sizeMm);
 
                 var gk = new GroupKey
                 {
+                    FamilyName = dt.FamilyName,
                     UnitStr = unitStr,
                     SizeMm = snapped,
                     Decimals = decimals
@@ -338,9 +344,9 @@ namespace HMVTools
         {
             typesToDelete = new List<int>();
 
-            // Map type → instances
-            var typeToInstances =
-                new Dictionary<int, List<Dimension>>();
+            // Map type → instance IDs (store IDs, not live refs)
+            var typeToInstanceIds =
+                new Dictionary<int, List<int>>();
 
             foreach (Dimension inst in
                 new FilteredElementCollector(doc)
@@ -348,9 +354,10 @@ namespace HMVTools
                     .WhereElementIsNotElementType())
             {
                 int tid = inst.GetTypeId().IntegerValue;
-                if (!typeToInstances.ContainsKey(tid))
-                    typeToInstances[tid] = new List<Dimension>();
-                typeToInstances[tid].Add(inst);
+                if (!typeToInstanceIds.ContainsKey(tid))
+                    typeToInstanceIds[tid] = new List<int>();
+                typeToInstanceIds[tid].Add(
+                    inst.Id.IntegerValue);
             }
 
             using (var tx = new Transaction(doc,
@@ -368,7 +375,7 @@ namespace HMVTools
                     if (keeperItem == null || group.Count == 0)
                         continue;
 
-                    // Find keeper element
+                    // Find keeper element (re-fetch fresh)
                     Element keeperElem = doc.GetElement(
                         new ElementId(keeperItem.Id));
 
@@ -444,13 +451,29 @@ namespace HMVTools
                         if (gi.Id == finalKeeperId.IntegerValue)
                             continue;
 
-                        List<Dimension> instances;
-                        if (!typeToInstances.TryGetValue(
-                            gi.Id, out instances))
-                            instances = new List<Dimension>();
+                        List<int> instIds;
+                        if (!typeToInstanceIds.TryGetValue(
+                            gi.Id, out instIds))
+                            instIds = new List<int>();
 
-                        foreach (Dimension inst in instances)
+                        foreach (int instIdInt in instIds)
                         {
+                            // Re-fetch fresh from doc each time
+                            Dimension inst = doc.GetElement(
+                                new ElementId(instIdInt))
+                                as Dimension;
+
+                            if (inst == null)
+                                continue;
+
+                            // Skip dimensions inside groups
+                            if (inst.GroupId !=
+                                ElementId.InvalidElementId)
+                            {
+                                _instancesSkippedGroup++;
+                                continue;
+                            }
+
                             try
                             {
                                 inst.ChangeTypeId(finalKeeperId);
@@ -459,8 +482,7 @@ namespace HMVTools
                             catch (Exception ex)
                             {
                                 _allErrors.Add(
-                                    $"Instance " +
-                                    $"{inst.Id.IntegerValue}: " +
+                                    $"Instance {instIdInt}: " +
                                     $"{ex.Message}");
                             }
                         }
@@ -474,7 +496,7 @@ namespace HMVTools
                     if (merged > 0 || reassigned > 0)
                     {
                         _mergeDetails.Add(
-                            $"  {gk.UnitStr} | " +
+                            $"  [{gk.FamilyName}] {gk.UnitStr} | " +
                             $"{gk.SizeMm}mm | " +
                             $"{gk.Decimals} dec " +
                             $"-> \"{stdName}\": " +
@@ -560,8 +582,9 @@ namespace HMVTools
         }
 
         // ════════════════════════════════════════════════════════════
-        //  Unit & Decimal extraction
+        //  Unit & Decimal extraction via ValueString
         // ════════════════════════════════════════════════════════════
+
         /// <summary>
         /// Reads unit (m/mm) and decimal count (2 or 3) from a
         /// placed Dimension's ValueString. Falls back to project
@@ -662,7 +685,6 @@ namespace HMVTools
             }
         }
 
-
         // ════════════════════════════════════════════════════════════
         //  Helpers
         // ════════════════════════════════════════════════════════════
@@ -672,9 +694,7 @@ namespace HMVTools
             string xStr = new string('X', gk.Decimals);
             return string.Format(STD_NAME_TEMPLATE,
                 gk.UnitStr,
-                gk.SizeMm % 1 == 0
-                    ? gk.SizeMm.ToString("0.0")
-                    : gk.SizeMm.ToString("0.0"),
+                gk.SizeMm.ToString("0.0"),
                 xStr);
         }
 
@@ -815,13 +835,14 @@ namespace HMVTools
 
         private class GroupKey
         {
+            public string FamilyName { get; set; }
             public string UnitStr { get; set; }
             public double SizeMm { get; set; }
             public int Decimals { get; set; }
 
             public string ToKey()
             {
-                return $"{UnitStr}|{SizeMm}|{Decimals}";
+                return $"{FamilyName}|{UnitStr}|{SizeMm}|{Decimals}";
             }
         }
 

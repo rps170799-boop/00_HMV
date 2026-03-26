@@ -162,6 +162,35 @@ namespace HMVTools
             BitmapImage iconMP = LoadImage("HMVTools.Resources.multiparam_32.png");
             if (iconMP != null) btnMP.LargeImage = iconMP;
 
+           
+
+            PushButtonData btnFoundation = new PushButtonData(
+                "FoundationControl",
+                "Foundation\nControl",
+                path,
+                "HMVTools.FoundationLayoutCommand");
+            btnFoundation.ToolTip = "Foundation Layout & Elevation Manager";
+            btnFoundation.LongDescription =
+                "Adjust the vertical position of structural foundations to match "
+                + "a desired NTCE (top of concrete elevation) in survey coordinates.\n\n"
+                + "Workflow:\n"
+                + "1. Select structural foundations in the model.\n"
+                + "2. Choose the Revit link containing the reference floors.\n"
+                + "3. View the foundations on a scale-to-fit plan canvas.\n"
+                + "4. Review the detected NAP (floor level) for each foundation.\n"
+                + "5. Edit the desired NTCE elevation (survey meters).\n"
+                + "6. Apply to move foundations vertically in one transaction.\n\n"
+                + "Features:\n"
+                + "• Dense downward raycasting for accurate floor detection on slopes\n"
+                + "• Displays NAP in both survey and project coordinates\n"
+                + "• Visual plan canvas with interactive selection\n"
+                + "• Validates all inputs before applying changes";
+            PushButton btnFC = panelFamily.AddItem(btnFoundation) as PushButton;
+            BitmapImage iconFC = LoadImage("HMVTools.Resources.foundation_32.png");
+            if (iconFC != null) btnFC.LargeImage = iconFC;
+
+
+
             // ── Annotation Tools Panel ──
             RibbonPanel panelAnnot = app.CreateRibbonPanel("HMV Tools", "Annotation Tools");
 
@@ -368,6 +397,7 @@ namespace HMVTools
                 + "• Colour-coded report with clipboard export\n"
                 + "• Auto-stamps families with traceability metadata";
             PushButton btnFA = panelAudit.AddItem(btnFamilyAudit) as PushButton;
+            btnFA.Enabled = false;
             BitmapImage iconFA = LoadImage("HMVTools.Resources.familyaudit_32.png");
             if (iconFA != null) btnFA.LargeImage = iconFA;
 
@@ -621,4 +651,5 @@ namespace HMVTools
 
         public string GetName() => "HMV Family Traceability Stamp Handler";
     }
+
 }

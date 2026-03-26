@@ -80,6 +80,7 @@
     <Compile Include="Commands\Audit\Viewauditcommand.cs" />
     <Compile Include="Commands\DWG\Dwg3dtoshapecommand.cs" />
     <Compile Include="Commands\DWG\DwgConvertCommand.cs" />
+    <Compile Include="Commands\FamilyControl\Foundationlayoutcommand.cs" />
     <Compile Include="Commands\FamilyControl\MultiParamEditorCommand.cs" />
     <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
     <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
@@ -105,6 +106,7 @@
     <Compile Include="Commands\Annotation\TopographyToLinesCommand.cs" />
     <Compile Include="WindowUI\Annotation\TopographyToLinesWindow.cs" />
     <Compile Include="Commands\FamilyControl\Usdtuberiaconfigcommand.cs" />
+    <Compile Include="WindowUI\FamilyControl\Foundationlayoutwindow.cs" />
     <Compile Include="WindowUI\FamilyControl\MultiParamEditorWindow.cs" />
     <Compile Include="WindowUI\FamilyControl\MultiParamModeWindow.cs" />
     <Compile Include="WindowUI\FamilyControl\Refreshztofloorwindow.cs" />
@@ -149,7 +151,11 @@
     <EmbeddedResource Include="Resources\dwg3d_32.png" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Resources\dimaudit_32.png" />
+    <EmbeddedResource Include="Resources\dimaudit_32.png" />
+    <EmbeddedResource Include="Resources\foundation_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\familyaudit_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
