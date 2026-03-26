@@ -86,6 +86,7 @@
     <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
     <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
+    <Compile Include="WindowUI\Annotation\TopographyOffsetsWindow.cs" />
     <Compile Include="WindowUI\Audit\Dimensionauditreportwindow.cs" />
     <Compile Include="WindowUI\Audit\Familyauditconfigwindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
