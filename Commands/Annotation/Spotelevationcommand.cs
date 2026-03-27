@@ -437,6 +437,13 @@ namespace HMVTools
             return Result.Succeeded;
         }
 
+        /// <summary>
+        /// Raycasts downward across a dense sample grid within the element's
+        /// bounding box and returns the ReferenceWithContext whose Z belongs
+        /// to the most-voted elevation group.
+        /// Vote-by-frequency: the concrete top face is large → hit by MANY rays;
+        /// anchor bolt tops are tiny → hit by very FEW rays.
+        /// </summary>
         private ReferenceWithContext FindHighestFaceInBBox(ReferenceIntersector intersector, XYZ bbMin, XYZ bbMax, ElementId linkInstanceId, ElementId targetElementId, List<string> debugInfo)
         {
             double xMin = Math.Min(bbMin.X, bbMax.X), xMax = Math.Max(bbMin.X, bbMax.X);
@@ -462,14 +469,21 @@ namespace HMVTools
             samples.Add(new XYZ((xMin + xMax) / 2, yMin, 0)); samples.Add(new XYZ((xMin + xMax) / 2, yMax, 0));
             samples.Add(new XYZ(xMin, (yMin + yMax) / 2, 0)); samples.Add(new XYZ(xMax, (yMin + yMax) / 2, 0));
 
-            ReferenceWithContext bestHit = null;
-            double bestProx = double.MaxValue;
-            int totalHits = 0, linkHits = 0;
+            double rayOriginZ = zTop + 200;
+            int totalHits = 0, matchHits = 0;
+
+            // Collect all matching hits with their Z values
+            var hitData = new List<KeyValuePair<double, ReferenceWithContext>>();
 
             foreach (XYZ xy in samples)
             {
-                var hits = intersector.Find(new XYZ(xy.X, xy.Y, zTop + 200), XYZ.BasisZ.Negate());
+                var hits = intersector.Find(new XYZ(xy.X, xy.Y, rayOriginZ), XYZ.BasisZ.Negate());
                 if (hits == null) continue;
+
+                // Per ray, take only the first (closest) hit matching our element
+                double bestProxThisRay = double.MaxValue;
+                double bestZThisRay = 0;
+                ReferenceWithContext bestRwcThisRay = null;
 
                 foreach (var rwc in hits)
                 {
@@ -480,12 +494,62 @@ namespace HMVTools
                         : (r.ElementId == targetElementId);
 
                     if (!match) continue;
-                    linkHits++;
-                    if (rwc.Proximity < bestProx) { bestProx = rwc.Proximity; bestHit = rwc; }
+                    matchHits++;
+
+                    if (rwc.Proximity < bestProxThisRay)
+                    {
+                        bestProxThisRay = rwc.Proximity;
+                        bestZThisRay = r.GlobalPoint != null
+                            ? r.GlobalPoint.Z
+                            : (rayOriginZ - rwc.Proximity);
+                        bestRwcThisRay = rwc;
+                    }
                 }
+
+                if (bestRwcThisRay != null)
+                    hitData.Add(new KeyValuePair<double, ReferenceWithContext>(bestZThisRay, bestRwcThisRay));
             }
-            debugInfo.Add($"  NTCE rays={samples.Count}, total={totalHits}, match={linkHits}, found={bestHit != null}");
-            return bestHit;
+
+            debugInfo.Add($"  NTCE rays={samples.Count}, total={totalHits}, match={matchHits}, zValues={hitData.Count}");
+
+            if (hitData.Count == 0) return null;
+
+            // Vote-by-frequency: group Z values by tolerance (5 mm ≈ 0.016 ft).
+            // The concrete top face is large → hit by MANY rays.
+            // Anchor bolt tops are tiny → hit by very FEW rays.
+            // Pick the Z group with the most votes.
+            double groupTol = 0.017; // ~5 mm in feet
+            var groups = new List<KeyValuePair<double, List<ReferenceWithContext>>>(); // avgZ, hits in group
+
+            foreach (var entry in hitData)
+            {
+                double z = entry.Key;
+                bool merged = false;
+                for (int gi = 0; gi < groups.Count; gi++)
+                {
+                    if (Math.Abs(z - groups[gi].Key) < groupTol)
+                    {
+                        // Running average + add hit to group
+                        var grp = groups[gi];
+                        int newCount = grp.Value.Count + 1;
+                        double newAvg = grp.Key + (z - grp.Key) / newCount;
+                        grp.Value.Add(entry.Value);
+                        groups[gi] = new KeyValuePair<double, List<ReferenceWithContext>>(newAvg, grp.Value);
+                        merged = true;
+                        break;
+                    }
+                }
+                if (!merged)
+                    groups.Add(new KeyValuePair<double, List<ReferenceWithContext>>(
+                        z, new List<ReferenceWithContext> { entry.Value }));
+            }
+
+            // Find group with maximum votes
+            var winner = groups.OrderByDescending(g => g.Value.Count).First();
+            debugInfo.Add($"  NTCE-vote: groups={groups.Count}, winner Z={winner.Key:F4}ft, votes={winner.Value.Count}/{hitData.Count}");
+
+            // Return the hit with smallest proximity within the winning group
+            return winner.Value.OrderBy(rwc => rwc.Proximity).First();
         }
 
         private ReferenceWithContext FindFirstHitOnLink(IList<ReferenceWithContext> hits, ElementId linkId)
