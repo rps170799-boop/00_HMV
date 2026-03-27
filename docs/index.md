@@ -6,17 +6,18 @@
 
 ## Instalación
 Para instalar las herramientas en tu equipo:
-<br>
+
 1. Descarga la última versión del instalador `.msi` desde el entorno, ruta del archivo debe ser asignada por el coordinador BIM.
-<br>
+<br><br>
 [Ir a la carpeta en ACC](https://acc.autodesk.com/docs/files/projects/992dbb1c-6004-472d-a416-934fff1806d1?folderUrn=urn%3Aadsk.wipprod%3Afs.folder%3Aco.DX2kA7XYTIG91f0G8eY18g&viewModel=detail&moduleId=folders){ .md-button }
-<br>
+<br><br>
 > **Nota:** El acceso a esta carpeta puede estar restringido.
-<br>
+
+
 2. Cierra Revit.
-<br>
+
 3. Ejecuta el instalador y sigue las instrucciones.
-<br>
+
 4. Al abrir Revit, encontrarás la nueva pestaña **HMV Tools** en la cinta de opciones (Ribbon).
 
 ---

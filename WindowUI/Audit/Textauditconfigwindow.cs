@@ -45,7 +45,7 @@ namespace HMVTools
         {
             Title = "HMV Tools – Text Audit Settings";
             Width = 480;
-            Height = 420;
+            Height = 500;
             WindowStartupLocation =
                 WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
@@ -78,7 +78,7 @@ namespace HMVTools
 
             _fontCombo = new ComboBox
             {
-                Height = 32,
+                Height = 30,
                 FontSize = 13,
                 Margin = new Thickness(0, 0, 0, 12),
                 IsEditable = true
