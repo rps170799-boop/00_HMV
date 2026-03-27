@@ -7,21 +7,21 @@ theme:
   logo: img/HMVlogo.png
   favicon: img/HMVlogo.png
   palette:
-    # Botón para modo claro
-    - scheme: default
-      primary: blue
-      accent: yellow
-      toggle:
-        icon: material/brightness-7
-        name: Cambiar a modo oscuro
-    
-    # Botón para modo oscuro
+   
     - scheme: slate
       primary: white
       accent: blue
       toggle:
         icon: material/brightness-4
         name: Cambiar a modo claro
+        
+    
+    - scheme: default
+      primary: blue
+      accent: yellow
+      toggle:
+        icon: material/brightness-7
+        name: Cambiar a modo oscuro
   
   features:
     - navigation.tabs
