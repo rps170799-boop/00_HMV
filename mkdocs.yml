@@ -1,16 +1,38 @@
 site_name: Manual de HMV Tools
 site_description: Documentación oficial y guía de usuario para los scripts de Revit de HMV.
+
 theme:
   name: material
+  language: es
+  logo: img/HMVlogo.png
+  favicon: img/HMVlogo.png
   palette:
-    scheme: default
-    primary: blue
-    accent: yellow
+    # Botón para modo claro
+    - scheme: default
+      primary: blue
+      accent: yellow
+      toggle:
+        icon: material/brightness-7
+        name: Cambiar a modo oscuro
+    
+    # Botón para modo oscuro
+    - scheme: slate
+      primary: white
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Cambiar a modo claro
+  
   features:
     - navigation.tabs
     - search.suggest
     - search.highlight
     - content.code.copy
+    - navigation.top
+  
+  font:
+    text: Roboto
+    code: Roboto Mono
 
 nav:
   - Inicio: index.md

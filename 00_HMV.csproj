@@ -161,8 +161,9 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\familyaudit_32.png" />
   </ItemGroup>
+  <ItemGroup />
   <ItemGroup>
-    <Folder Include="docs\img\" />
+    <Content Include="docs\img\HMVlogo.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
