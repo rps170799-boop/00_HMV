@@ -11,9 +11,10 @@ namespace HMVTools
     [Transaction(TransactionMode.Manual)]
     public class TextAuditCommand : IExternalCommand
     {
-        // ── Standards ──────────────────────────────────────────────
-        private const string STD_FONT = "Arial";
-        private const double STD_WIDTH = 1.0;
+        // ── Standards (set from config window) ────────────────────
+        private string _stdFont;
+        private double _stdWidth;
+        private string _stdNameTemplate;
         private const int STD_BOLD = 0;
         // Revit API: TEXT_BACKGROUND  0 = Opaque, 1 = Transparent
         private const int STD_OPAQUE = 0;
@@ -21,10 +22,7 @@ namespace HMVTools
         private static readonly double[] STD_SIZES =
             { 1.5, 2.0, 2.5, 3.0, 3.5 };
 
-        private const string STD_NAME_TEMPLATE =
-            "HMV_General_{0}mm Arial";
-
-        // ── Counters for unified report ────────────────────────────
+        // ── Counters for unified report ───────────────────────────
         private int _typesStandardized;
         private int _instancesReassigned;
         private int _typesDeleted;
@@ -37,7 +35,7 @@ namespace HMVTools
         private List<string> _familyDetails;
         private List<string> _allErrors;
 
-        // ── Entry point ────────────────────────────────────────────
+        // ── Entry point ───────────────────────────────────────────
 
         public Result Execute(ExternalCommandData commandData,
             ref string message, ElementSet elements)
@@ -47,6 +45,17 @@ namespace HMVTools
 
             try
             {
+                // ── Show config window ────────────────────────
+                var config = new TextAuditConfigWindow();
+                bool? result = config.ShowDialog();
+
+                if (result != true)
+                    return Result.Cancelled;
+
+                _stdFont = config.SelectedFont;
+                _stdWidth = config.SelectedWidth;
+                _stdNameTemplate = config.SelectedNameTemplate;
+
                 // Init counters
                 _typesStandardized = 0;
                 _instancesReassigned = 0;
@@ -60,24 +69,24 @@ namespace HMVTools
                 _familyDetails = new List<string>();
                 _allErrors = new List<string>();
 
-                // ── STEP 1 ────────────────────────────────────────
+                // ── STEP 1 ───────────────────────────────────
                 Step01A_StandardizeAndGroup(doc,
                     out List<double> sizeList,
                     out List<List<int>> groupIdList,
                     out List<int> keeperIdList);
 
-                // ── STEP 2 ────────────────────────────────────────
+                // ── STEP 2 ───────────────────────────────────
                 Step01B_ReassignInstances(doc,
                     sizeList, groupIdList, keeperIdList,
                     out List<int> typesToDelete);
 
-                // ── STEP 3 ────────────────────────────────────────
+                // ── STEP 3 ───────────────────────────────────
                 Step01C_DeleteEmptyTypes(doc, typesToDelete);
 
-                // ── STEP 4 ────────────────────────────────────────
+                // ── STEP 4 ───────────────────────────────────
                 Step02_StandardizeTagFamilies(doc);
 
-                // ── Build unified report ──────────────────────────
+                // ── Build unified report ─────────────────────
                 string report = BuildReport();
 
                 var window = new TextAuditReportWindow(report);
@@ -97,105 +106,103 @@ namespace HMVTools
             }
         }
 
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         //  UNIFIED REPORT
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private string BuildReport()
         {
             var sb = new StringBuilder();
 
-            sb.AppendLine("HMV TEXT AUDIT - STANDARDIZATION REPORT");
-            sb.AppendLine(new string('=', 55));
-            sb.AppendLine();
+            sb.AppendLine("TEXT AUDIT REPORT");
+            sb.AppendLine(
+                $"Font: {_stdFont}  |  Width: {_stdWidth}  |  " +
+                $"Template: {_stdNameTemplate}");
+            sb.AppendLine(new string('─', 52));
 
-            // ── Summary counts ─────────────────────────────────────
-            sb.AppendLine("SUMMARY");
-            sb.AppendLine(new string('-', 55));
+            // ── Summary ─────────────────────────────────────────
             sb.AppendLine(
-                $"  Types standardized (properties):  {_typesStandardized}");
+                $"  Types standardized ......... {_typesStandardized}");
             sb.AppendLine(
-                $"  Instances reassigned to keepers:  {_instancesReassigned}");
+                $"  Instances reassigned ....... {_instancesReassigned}");
             sb.AppendLine(
-                $"  Duplicate types deleted:          {_typesDeleted}");
+                $"  Duplicates deleted ......... {_typesDeleted}");
             sb.AppendLine(
-                $"  Types skipped (still in use):     {_typesSkippedDeletion}");
+                $"  Skipped (still in use) ..... {_typesSkippedDeletion}");
             sb.AppendLine(
-                $"  Tag families updated & reloaded:  {_familiesChanged}");
+                $"  Tag families updated ....... {_familiesChanged}");
             sb.AppendLine(
-                $"  Tag families already compliant:   {_familiesCompliant}");
-            sb.AppendLine();
+                $"  Tag families compliant ..... {_familiesCompliant}");
 
-            // ── Property changes ───────────────────────────────────
+            // ── Property changes ────────────────────────────────
             if (_propertyChanges.Count > 0)
             {
+                sb.AppendLine();
                 sb.AppendLine("PROPERTY CHANGES");
-                sb.AppendLine(new string('-', 55));
+                sb.AppendLine(new string('─', 52));
                 foreach (string c in _propertyChanges)
-                {
                     sb.AppendLine(c);
-                    sb.AppendLine();
-                }
             }
 
-            // ── Merge / reassign details ───────────────────────────
+            // ── Merge / reassign details ────────────────────────
             if (_mergeDetails.Count > 0)
             {
-                sb.AppendLine("TYPE MERGE & REASSIGNMENT");
-                sb.AppendLine(new string('-', 55));
+                sb.AppendLine();
+                sb.AppendLine("MERGE & REASSIGNMENT");
+                sb.AppendLine(new string('─', 52));
                 foreach (string m in _mergeDetails)
                     sb.AppendLine(m);
-                sb.AppendLine();
             }
 
-            // ── Deletion details ───────────────────────────────────
+            // ── Deletion details ────────────────────────────────
             if (_deleteDetails.Count > 0)
             {
+                sb.AppendLine();
                 sb.AppendLine("PURGED TYPES");
-                sb.AppendLine(new string('-', 55));
+                sb.AppendLine(new string('─', 52));
                 foreach (string d in _deleteDetails)
                     sb.AppendLine(d);
-                sb.AppendLine();
             }
 
-            // ── Tag family details ─────────────────────────────────
+            // ── Tag family details ──────────────────────────────
             if (_familyDetails.Count > 0)
             {
+                sb.AppendLine();
                 sb.AppendLine("TAG FAMILIES UPDATED");
-                sb.AppendLine(new string('-', 55));
+                sb.AppendLine(new string('─', 52));
                 foreach (string f in _familyDetails)
                     sb.AppendLine(f);
-                sb.AppendLine();
             }
 
-            // ── Errors ─────────────────────────────────────────────
+            // ── Errors ──────────────────────────────────────────
             if (_allErrors.Count > 0)
             {
+                sb.AppendLine();
                 sb.AppendLine($"ERRORS ({_allErrors.Count})");
-                sb.AppendLine(new string('-', 55));
+                sb.AppendLine(new string('─', 52));
                 foreach (string e in _allErrors)
                     sb.AppendLine("  - " + e);
-                sb.AppendLine();
             }
 
             if (_allErrors.Count == 0)
             {
-                sb.AppendLine("No errors.");
+                sb.AppendLine();
+                sb.AppendLine("✓ No errors.");
             }
 
             return sb.ToString();
         }
 
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         //  STEP 01A – Standardize properties + group by size
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private void Step01A_StandardizeAndGroup(Document doc,
             out List<double> sizeList,
             out List<List<int>> groupIdList,
             out List<int> keeperIdList)
         {
-            // ── Collect types ──────────────────────────────────────
+            // ── Collect types ──────────────────────────────────
             var allTypes = new FilteredElementCollector(doc)
                 .WhereElementIsElementType()
                 .ToElements();
@@ -213,7 +220,7 @@ namespace HMVTools
                     textNoteTypes.Add(t);
             }
 
-            // ── Count instances per type ───────────────────────────
+            // ── Count instances per type ───────────────────────
             var instanceCount = new Dictionary<int, int>();
 
             foreach (TextNote inst in new FilteredElementCollector(doc)
@@ -226,7 +233,7 @@ namespace HMVTools
                 instanceCount[tid]++;
             }
 
-            // ── Standardize properties (Transaction) ───────────────
+            // ── Standardize properties (Transaction) ───────────
             using (var tx = new Transaction(doc,
                 "HMV Text Audit – Standardize Properties"))
             {
@@ -260,7 +267,7 @@ namespace HMVTools
                 tx.Commit();
             }
 
-            // ── Group TextNoteTypes by size ────────────────────────
+            // ── Group TextNoteTypes by size ────────────────────
             var sizeGroups = new Dictionary<double, List<GroupItem>>();
             foreach (double s in STD_SIZES)
                 sizeGroups[s] = new List<GroupItem>();
@@ -286,13 +293,13 @@ namespace HMVTools
                 });
             }
 
-            // ── Find keepers per size ──────────────────────────────
+            // ── Find keepers per size ──────────────────────────
             var keeperPerSize = new Dictionary<double, GroupItem>();
 
             foreach (double size in STD_SIZES)
             {
                 string stdName = string.Format(
-                    STD_NAME_TEMPLATE, size);
+                    _stdNameTemplate, size);
                 var group = sizeGroups[size];
 
                 if (group.Count == 0)
@@ -311,7 +318,7 @@ namespace HMVTools
                 keeperPerSize[size] = keeper;
             }
 
-            // ── Output lists ───────────────────────────────────────
+            // ── Output lists ───────────────────────────────────
             sizeList = new List<double>(STD_SIZES);
             groupIdList = new List<List<int>>();
             keeperIdList = new List<int>();
@@ -325,9 +332,9 @@ namespace HMVTools
             }
         }
 
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         //  STEP 01B – Reassign instances to keepers
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private void Step01B_ReassignInstances(Document doc,
             List<double> sizes,
@@ -363,7 +370,7 @@ namespace HMVTools
                     var group = groupIds[i];
                     int keeperIdInt = keeperIds[i];
                     string stdName = string.Format(
-                        STD_NAME_TEMPLATE, size);
+                        _stdNameTemplate, size);
 
                     if (keeperIdInt == -1 || group.Count == 0)
                         continue;
@@ -485,8 +492,8 @@ namespace HMVTools
                     {
                         _mergeDetails.Add(
                             $"  {size}mm -> \"{stdName}\": " +
-                            $"{merged} types merged, " +
-                            $"{reassigned} instances reassigned");
+                            $"{merged} merged, " +
+                            $"{reassigned} reassigned");
                     }
                 }
 
@@ -494,9 +501,9 @@ namespace HMVTools
             }
         }
 
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         //  STEP 01C – Delete empty types
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private void Step01C_DeleteEmptyTypes(Document doc,
             List<int> typesToDelete)
@@ -542,8 +549,8 @@ namespace HMVTools
                     {
                         _typesSkippedDeletion++;
                         _deleteDetails.Add(
-                            $"  SKIPPED: {name} (ID: {eid}) " +
-                            $"- still has {count} instances");
+                            $"  SKIP: {name} " +
+                            $"({count} instances remain)");
                         continue;
                     }
 
@@ -552,7 +559,7 @@ namespace HMVTools
                         doc.Delete(elem.Id);
                         _typesDeleted++;
                         _deleteDetails.Add(
-                            $"  DELETED: {name} (ID: {eid})");
+                            $"  DEL:  {name}");
                     }
                     catch (Exception ex)
                     {
@@ -566,9 +573,9 @@ namespace HMVTools
             }
         }
 
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         //  STEP 02 – Standardize annotation tag families
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private void Step02_StandardizeTagFamilies(Document doc)
         {
@@ -597,7 +604,8 @@ namespace HMVTools
             {
                 string famName = f.Name;
 
-                if (famName.Contains("Membrete") || famName.Contains("Pagina Inicio"))
+                if (famName.Contains("Membrete") ||
+                    famName.Contains("Pagina Inicio"))
                 {
                     _familiesCompliant++;
                     continue;
@@ -689,9 +697,9 @@ namespace HMVTools
             }
         }
 
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
         //  Helpers
-        // ════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════
 
         private static double NearestSize(double valMm)
         {
@@ -710,9 +718,9 @@ namespace HMVTools
             return closest;
         }
 
-        // ── Parameter setters ──────────────────────────────────────
+        // ── Parameter setters ──────────────────────────────────
 
-        private static void TrySet_Font(Element t,
+        private void TrySet_Font(Element t,
             List<string> props)
         {
             try
@@ -720,17 +728,17 @@ namespace HMVTools
                 Parameter p = t.get_Parameter(
                     BuiltInParameter.TEXT_FONT);
                 if (p != null && !p.IsReadOnly &&
-                    p.AsString() != STD_FONT)
+                    p.AsString() != _stdFont)
                 {
                     string old = p.AsString();
-                    p.Set(STD_FONT);
-                    props.Add($"Font: {old} -> {STD_FONT}");
+                    p.Set(_stdFont);
+                    props.Add($"Font: {old} -> {_stdFont}");
                 }
             }
             catch { /* skip */ }
         }
 
-        private static void TrySet_Width(Element t,
+        private void TrySet_Width(Element t,
             List<string> props)
         {
             try
@@ -738,11 +746,11 @@ namespace HMVTools
                 Parameter p = t.get_Parameter(
                     BuiltInParameter.TEXT_WIDTH_SCALE);
                 if (p != null && !p.IsReadOnly &&
-                    Math.Round(p.AsDouble(), 4) != STD_WIDTH)
+                    Math.Round(p.AsDouble(), 4) != _stdWidth)
                 {
                     double old = Math.Round(p.AsDouble(), 4);
-                    p.Set(STD_WIDTH);
-                    props.Add($"Width: {old} -> {STD_WIDTH}");
+                    p.Set(_stdWidth);
+                    props.Add($"Width: {old} -> {_stdWidth}");
                 }
             }
             catch { /* skip */ }
@@ -813,7 +821,7 @@ namespace HMVTools
             catch { /* skip */ }
         }
 
-        // ── Internal model ─────────────────────────────────────────
+        // ── Internal model ─────────────────────────────────────
 
         private class GroupItem
         {

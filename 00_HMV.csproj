@@ -91,6 +91,7 @@
     <Compile Include="WindowUI\Audit\Dimensionauditreportwindow.cs" />
     <Compile Include="WindowUI\Audit\Familyauditconfigwindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
+    <Compile Include="WindowUI\Audit\Textauditconfigwindow.cs" />
     <Compile Include="WindowUI\Audit\Viewauditwindow.cs" />
     <Compile Include="WindowUI\DWG\Dwg3dprogresswindow.cs" />
     <Compile Include="WindowUI\DWG\Dwg3dtoshapewindow.cs" />

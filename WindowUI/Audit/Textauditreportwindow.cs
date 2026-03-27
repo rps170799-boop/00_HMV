@@ -8,12 +8,11 @@ namespace HMVTools
 {
     /// <summary>
     /// Read-only report window shown after the Text Audit completes.
-    /// Follows the same visual language as PipeAnnotationWindow /
-    /// DwgConvertWindow.
+    /// Compact layout with copy-to-clipboard support.
     /// </summary>
     public class TextAuditReportWindow : Window
     {
-        // Colors (shared palette)
+        // ── Colors (shared HMV palette) ───────────────────────
         private static readonly Color BluePrimary =
             Color.FromRgb(0, 120, 212);
         private static readonly Color GrayBg =
@@ -36,17 +35,15 @@ namespace HMVTools
             reportText = report;
 
             Title = "HMV Tools – Text Audit Report";
-            Width = 640;
-            Height = 620;
+            Width = 580;
+            Height = 520;
             WindowStartupLocation =
                 WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.CanResizeWithGrip;
             Background = new SolidColorBrush(WindowBg);
 
             var mainGrid = new Grid();
-            mainGrid.Margin = new Thickness(20);
-            mainGrid.RowDefinitions.Add(
-                new RowDefinition { Height = GridLength.Auto });
+            mainGrid.Margin = new Thickness(20, 16, 20, 16);
             mainGrid.RowDefinitions.Add(
                 new RowDefinition { Height = GridLength.Auto });
             mainGrid.RowDefinitions.Add(
@@ -58,38 +55,38 @@ namespace HMVTools
             mainGrid.RowDefinitions.Add(
                 new RowDefinition { Height = GridLength.Auto });
 
-            // ── Row 0: Title ───────────────────────────────────
-            var title = new TextBlock
+            // ── Row 0: Header ─────────────────────────────────
+            var headerPanel = new StackPanel();
+            headerPanel.Margin = new Thickness(0, 0, 0, 10);
+
+            headerPanel.Children.Add(new TextBlock
             {
-                Text = "Text Audit Complete",
-                FontSize = 18,
+                Text = "✓  Audit Complete",
+                FontSize = 16,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(DarkText),
-                Margin = new Thickness(0, 0, 0, 4)
-            };
-            Grid.SetRow(title, 0);
-            mainGrid.Children.Add(title);
+                Foreground = new SolidColorBrush(SuccessGreen)
+            });
 
-            // ── Row 1: Subtitle ────────────────────────────────
-            var subtitle = new TextBlock
+            headerPanel.Children.Add(new TextBlock
             {
-                Text = "All text styles, types, and tag " +
-                       "families have been standardized.",
-                FontSize = 12,
+                Text = "Text styles, types, and tag families " +
+                       "have been standardized.",
+                FontSize = 11,
                 Foreground = new SolidColorBrush(MutedText),
-                Margin = new Thickness(0, 0, 0, 12)
-            };
-            Grid.SetRow(subtitle, 1);
-            mainGrid.Children.Add(subtitle);
+                Margin = new Thickness(0, 2, 0, 0)
+            });
 
-            // ── Row 2: Report text box ─────────────────────────
+            Grid.SetRow(headerPanel, 0);
+            mainGrid.Children.Add(headerPanel);
+
+            // ── Row 1: Report text box ────────────────────────
             var textBorder = new Border
             {
                 CornerRadius = new CornerRadius(8),
                 BorderBrush = new SolidColorBrush(BorderColor),
                 BorderThickness = new Thickness(1),
                 Background = Brushes.White,
-                Margin = new Thickness(0, 0, 0, 14)
+                Margin = new Thickness(0, 0, 0, 10)
             };
 
             var textBox = new TextBox
@@ -103,18 +100,18 @@ namespace HMVTools
                 HorizontalScrollBarVisibility =
                     ScrollBarVisibility.Auto,
                 FontFamily = new FontFamily("Consolas"),
-                FontSize = 12,
+                FontSize = 11.5,
                 Foreground = new SolidColorBrush(DarkText),
                 BorderThickness = new Thickness(0),
                 Background = Brushes.Transparent,
-                Padding = new Thickness(12, 10, 12, 10)
+                Padding = new Thickness(10, 8, 10, 8)
             };
 
             textBorder.Child = textBox;
-            Grid.SetRow(textBorder, 2);
+            Grid.SetRow(textBorder, 1);
             mainGrid.Children.Add(textBorder);
 
-            // ── Row 3: Buttons ─────────────────────────────────
+            // ── Row 2: Buttons ────────────────────────────────
             var buttonPanel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -125,7 +122,7 @@ namespace HMVTools
             var copyBtn = CreateButton(
                 "Copy to Clipboard", GrayBg,
                 Color.FromRgb(60, 60, 60));
-            copyBtn.Width = 150;
+            copyBtn.Width = 140;
             copyBtn.Margin = new Thickness(0, 0, 8, 0);
             copyBtn.Click += (s, e) =>
             {
@@ -140,18 +137,18 @@ namespace HMVTools
             var closeBtn = CreateButton(
                 "Close", BluePrimary,
                 Color.FromRgb(255, 255, 255));
-            closeBtn.Width = 100;
+            closeBtn.Width = 90;
             closeBtn.Click += (s, e) => Close();
 
             buttonPanel.Children.Add(copyBtn);
             buttonPanel.Children.Add(closeBtn);
-            Grid.SetRow(buttonPanel, 3);
+            Grid.SetRow(buttonPanel, 2);
             mainGrid.Children.Add(buttonPanel);
 
             Content = mainGrid;
         }
 
-        // ── UI helpers (same as other HMV windows) ─────────────
+        // ── UI helpers (shared HMV style) ─────────────────────
 
         private Button CreateButton(string text,
             Color bgColor, Color fgColor)
@@ -159,8 +156,8 @@ namespace HMVTools
             var btn = new Button
             {
                 Content = text,
-                Height = 36,
-                FontSize = 13,
+                Height = 34,
+                FontSize = 12.5,
                 Foreground = new SolidColorBrush(fgColor),
                 Background = new SolidColorBrush(bgColor),
                 BorderThickness = new Thickness(0),
@@ -185,7 +182,7 @@ namespace HMVTools
                 new SolidColorBrush(bgColor));
             border.SetValue(
                 Border.PaddingProperty,
-                new Thickness(14, 6, 14, 6));
+                new Thickness(12, 5, 12, 5));
 
             var content = new FrameworkElementFactory(
                 typeof(ContentPresenter));
