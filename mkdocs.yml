@@ -17,7 +17,7 @@ theme:
         
     
     - scheme: default
-      primary: blue
+      primary: white
       accent: yellow
       toggle:
         icon: material/brightness-7
