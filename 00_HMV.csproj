@@ -115,7 +115,9 @@
     <Compile Include="WindowUI\Familytraceabilitymanager.cs" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="docs\index.md" />
     <None Include="HMV.addin" />
+    <None Include="mkdocs.yml" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
@@ -158,6 +160,9 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Resources\familyaudit_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="docs\img\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

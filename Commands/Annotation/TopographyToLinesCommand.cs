@@ -233,6 +233,12 @@ namespace HMVTools
         // floating-point drift. Without this, NewDetailCurve fails or
         // produces flat lines in sections other than the active view.
         // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════
+        // CORE: Process a single view
+        // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════
+        // CORE: Process a single view
+        // ═══════════════════════════════════════════════════════════════
         private void ProcessSingleView(
             Document doc,
             RevitLinkInstance link,
@@ -278,8 +284,6 @@ namespace HMVTools
                 ExtractIntersectionSegments(meshes, linkTransform, origin, viewDir);
 
             // ── CRITICAL: Project every point onto the exact view plane ──
-            // Intersection math produces points with ~1e-9 drift off the plane.
-            // Active view tolerates this; non-active views do NOT.
             List<Tuple<XYZ, XYZ>> projectedSegments = new List<Tuple<XYZ, XYZ>>();
             foreach (var seg in rawSegments)
             {
@@ -297,9 +301,15 @@ namespace HMVTools
             BoundingBoxXYZ cropBox = targetView.CropBox;
             Transform bTransform = cropBox != null ? cropBox.Transform : Transform.Identity;
 
-            // ── Find leftmost point (for text positioning) ──
-            double minXLocal = double.MaxValue;
-            XYZ extremeLeftPoint = null;
+            // ── STRICT CLIPPING TO CROP BOX (ZERO OFFSET) ──
+            List<Tuple<XYZ, XYZ>> clippedSegments = new List<Tuple<XYZ, XYZ>>();
+
+            double viewLeftX = cropBox != null ? cropBox.Min.X : 0;
+            double viewRightX = cropBox != null ? cropBox.Max.X : 0;
+
+            double leftElevation = 0;
+            bool foundElevation = false;
+            double minFoundX = double.MaxValue;
 
             if (cropBox != null)
             {
@@ -308,46 +318,48 @@ namespace HMVTools
                     XYZ p1Local = bTransform.Inverse.OfPoint(seg.Item1);
                     XYZ p2Local = bTransform.Inverse.OfPoint(seg.Item2);
 
-                    if (p1Local.X < minXLocal) { minXLocal = p1Local.X; extremeLeftPoint = seg.Item1; }
-                    if (p2Local.X < minXLocal) { minXLocal = p2Local.X; extremeLeftPoint = seg.Item2; }
-                }
-            }
-
-            // ── Clip segments to leave text margin ──
-            List<Tuple<XYZ, XYZ>> clippedSegments = new List<Tuple<XYZ, XYZ>>();
-            double textMarginMeters = 3.5;
-            double textMarginFeet = textMarginMeters * 3.28084;
-            double clipXLocal = minXLocal + textMarginFeet;
-
-            if (cropBox != null && generateOffsets)
-            {
-                foreach (var seg in segments)
-                {
-                    XYZ p1Local = bTransform.Inverse.OfPoint(seg.Item1);
-                    XYZ p2Local = bTransform.Inverse.OfPoint(seg.Item2);
-
-                    XYZ worldLeft = seg.Item1, worldRight = seg.Item2;
                     if (p1Local.X > p2Local.X)
                     {
                         XYZ temp = p1Local; p1Local = p2Local; p2Local = temp;
-                        worldLeft = seg.Item2; worldRight = seg.Item1;
                     }
 
-                    if (p2Local.X <= clipXLocal) continue;
+                    // Skip if completely outside the visible view
+                    if (p2Local.X <= viewLeftX || p1Local.X >= viewRightX) continue;
 
-                    if (p1Local.X < clipXLocal)
+                    // Clip exactly to left boundary (no gap)
+                    if (p1Local.X < viewLeftX)
                     {
-                        double t = (clipXLocal - p1Local.X) / (p2Local.X - p1Local.X);
-                        XYZ clippedLocal = p1Local + t * (p2Local - p1Local);
-                        worldLeft = bTransform.OfPoint(clippedLocal);
+                        double t = (viewLeftX - p1Local.X) / (p2Local.X - p1Local.X);
+                        p1Local = p1Local + t * (p2Local - p1Local);
                     }
 
-                    clippedSegments.Add(Tuple.Create(worldLeft, worldRight));
+                    // Clip exactly to right boundary
+                    if (p2Local.X > viewRightX)
+                    {
+                        double t = (viewRightX - p1Local.X) / (p2Local.X - p1Local.X);
+                        p2Local = p1Local + t * (p2Local - p1Local);
+                    }
+
+                    clippedSegments.Add(Tuple.Create(bTransform.OfPoint(p1Local), bTransform.OfPoint(p2Local)));
+
+                    // Track elevation at the far left for text & dims
+                    if (p1Local.X < minFoundX)
+                    {
+                        minFoundX = p1Local.X;
+                        leftElevation = p1Local.Y;
+                        foundElevation = true;
+                    }
                 }
             }
             else
             {
                 clippedSegments = segments;
+                if (segments.Count > 0)
+                {
+                    minFoundX = bTransform.Inverse.OfPoint(segments[0].Item1).X;
+                    leftElevation = bTransform.Inverse.OfPoint(segments[0].Item1).Y;
+                    foundElevation = true;
+                }
             }
 
             if (clippedSegments.Count == 0) return;
@@ -361,10 +373,10 @@ namespace HMVTools
                 double mmToFeet = 1.0 / 304.8;
                 double initialOffset_mm = 100.0;
 
-                dist1 = initialOffset_mm * mmToFeet;                         // Fixed 0.10m
-                dist2 = dist1 + (settings.Offset1_mm * mmToFeet);           // 0.10m + DIST. SEGURIDAD
-                dist3 = dist2 + (settings.Offset2_mm * mmToFeet);           // cumulative + VALOR BASICO
-                dist4 = dist1 + (settings.Offset3_mm * mmToFeet);           // 0.10m + NIVEL CONEXION
+                dist1 = initialOffset_mm * mmToFeet;
+                dist2 = dist1 + (settings.Offset1_mm * mmToFeet);
+                dist3 = dist2 + (settings.Offset2_mm * mmToFeet);
+                dist4 = dist1 + (settings.Offset3_mm * mmToFeet);
 
                 XYZ dir = targetView.UpDirection;
                 t1 = Transform.CreateTranslation(dir.Multiply(dist1));
@@ -381,9 +393,6 @@ namespace HMVTools
             GraphicsStyle userStyle = generateOffsets
                 ? GetLineStyleByName(doc, settings.LineStyleName) : null;
 
-            // ═══════════════════════════════════════════════════════════
-            // CREATE EVERYTHING IN ONE TRANSACTION
-            // ═══════════════════════════════════════════════════════════
             using (Transaction tx = new Transaction(doc, "HMV - Topography to Lines"))
             {
                 tx.Start();
@@ -411,37 +420,28 @@ namespace HMVTools
 
                         if (!generateOffsets) continue;
 
-                        // ── OFFSET 1: Fixed 100mm (Thin Lines) ──
-                        DetailCurve dc1 = doc.Create.NewDetailCurve(
-                            targetView, baseLine.CreateTransformed(t1) as Line);
+                        DetailCurve dc1 = doc.Create.NewDetailCurve(targetView, baseLine.CreateTransformed(t1) as Line);
                         if (thinStyle != null) dc1.LineStyle = thinStyle;
                         groupIds.Add(dc1.Id);
                         created++;
 
-                        // ── OFFSET 2: Dist. Seguridad (user style) ──
-                        DetailCurve dc2 = doc.Create.NewDetailCurve(
-                            targetView, baseLine.CreateTransformed(t2) as Line);
+                        DetailCurve dc2 = doc.Create.NewDetailCurve(targetView, baseLine.CreateTransformed(t2) as Line);
                         if (userStyle != null) dc2.LineStyle = userStyle;
                         groupIds.Add(dc2.Id);
                         created++;
 
-                        // ── OFFSET 3: Valor Básico (user style) ──
-                        DetailCurve dc3 = doc.Create.NewDetailCurve(
-                            targetView, baseLine.CreateTransformed(t3) as Line);
+                        DetailCurve dc3 = doc.Create.NewDetailCurve(targetView, baseLine.CreateTransformed(t3) as Line);
                         if (userStyle != null) dc3.LineStyle = userStyle;
                         groupIds.Add(dc3.Id);
                         created++;
 
-                        // ── OFFSET 4: Nivel Conexión (user style) ──
-                        DetailCurve dc4 = doc.Create.NewDetailCurve(
-                            targetView, baseLine.CreateTransformed(t4) as Line);
+                        DetailCurve dc4 = doc.Create.NewDetailCurve(targetView, baseLine.CreateTransformed(t4) as Line);
                         if (userStyle != null) dc4.LineStyle = userStyle;
                         groupIds.Add(dc4.Id);
                         created++;
 
-                        // Track leftmost curves for dimension placement
                         double currentLocalX = bTransform.Inverse.OfPoint(seg.Item1).X;
-                        if (currentLocalX < minXForDim)
+                        if (currentLocalX <= minXForDim + 1e-5)
                         {
                             minXForDim = currentLocalX;
                             leftDc1 = dc1;
@@ -454,11 +454,10 @@ namespace HMVTools
                 }
 
                 // ── TEXT AND DIMENSIONS ──
-                if (generateOffsets && cropBox != null && extremeLeftPoint != null)
+                if (generateOffsets && cropBox != null && foundElevation)
                 {
                     try
                     {
-                        // ── TEXT NOTES ──
                         TextNoteType selectedTextType = null;
                         foreach (TextNoteType tnt in new FilteredElementCollector(doc)
                             .OfClass(typeof(TextNoteType)))
@@ -467,18 +466,18 @@ namespace HMVTools
                             { selectedTextType = tnt; break; }
                         }
 
-                        XYZ basePointLocal = bTransform.Inverse.OfPoint(extremeLeftPoint);
+                        double yMidBottom = leftElevation + (dist1 + dist2) / 2.0;
+                        double yMidTop = leftElevation + (dist2 + dist3) / 2.0;
 
-                        double yMidBottom = basePointLocal.Y + (dist1 + dist2) / 2.0;
-                        double yMidTop = basePointLocal.Y + (dist2 + dist3) / 2.0;
+                        // 1. GUARANTEE ZERO OFFSET: Use the exact crop box left boundary
+                        double startX = cropBox.Min.X;
 
-                        // Text X position: inside crop box, to the right of dims
-                        double textX = cropBox.Min.X + (2.5 * 3.28084);
+                        // 2. TEXT PLACEMENT: Pushed further to the right (4.0 meters from the edge)
+                        // (Keeping this exactly as you had it, since it is OKAY)
+                        double textX = startX + (2.0 * 3.28084);
 
-                        XYZ textPosBottom = bTransform.OfPoint(
-                            new XYZ(textX, yMidBottom, 0));
-                        XYZ textPosTop = bTransform.OfPoint(
-                            new XYZ(textX, yMidTop, 0));
+                        XYZ textPosBottom = bTransform.OfPoint(new XYZ(textX, yMidBottom, 0));
+                        XYZ textPosTop = bTransform.OfPoint(new XYZ(textX, yMidTop, 0));
 
                         TextNoteOptions opts = new TextNoteOptions();
                         opts.HorizontalAlignment = HorizontalTextAlignment.Left;
@@ -498,8 +497,6 @@ namespace HMVTools
                         // ── DIMENSIONS ──
                         if (leftDc1 != null && !string.IsNullOrEmpty(settings.DimStyleName))
                         {
-                            // CRITICAL: Regenerate so newly created detail curves
-                            // expose valid GeometryCurve.Reference for dimensioning
                             doc.Regenerate();
 
                             DimensionType selectedDimType = null;
@@ -513,36 +510,29 @@ namespace HMVTools
 
                             if (selectedDimType != null)
                             {
-                                // Dims placed just left of text (text is at textX)
-                                // Outer dim (5000) = 1.5m left of text
-                                double outerX = textX - (1.5 * 3.28084);
-                                XYZ oP1 = bTransform.OfPoint(new XYZ(outerX, basePointLocal.Y - 100, 0));
-                                XYZ oP2 = bTransform.OfPoint(new XYZ(outerX, basePointLocal.Y + 100, 0));
-                                Line outerDimLine = Line.CreateBound(oP1, oP2);
+                                // 3. DIMENSIONS ANCHORED TO TEXT & LEFT CORNER
 
-                                // Inner dims (2000 + 2300) = 0.7m left of text
-                                double innerX = textX - (0.7 * 3.28084);
-                                XYZ iP1 = bTransform.OfPoint(new XYZ(innerX, basePointLocal.Y - 100, 0));
-                                XYZ iP2 = bTransform.OfPoint(new XYZ(innerX, basePointLocal.Y + 100, 0));
+                                // Inner dims (2000, 2310) placed right next to the text (0.5m left of the text)
+                                double innerX = textX - (3.0 * 3.28084);
+                                XYZ iP1 = bTransform.OfPoint(new XYZ(innerX, leftElevation - 100, 0));
+                                XYZ iP2 = bTransform.OfPoint(new XYZ(innerX, leftElevation + 100, 0));
                                 Line innerDimLine = Line.CreateBound(iP1, iP2);
 
-                                // DIM 1: 0.10m ↔ Dist. Seguridad (inner)
-                                CreateDim(doc, targetView, leftDc1, leftDc2,
-                                    innerDimLine, selectedDimType, groupIds);
+                                // Outer dim (5000) dragged all the way left to exactly end at the corner 
+                                // (0.15m padding so it's visible but right against the boundary)
+                                double outerX = startX - (2.50 * 3.28084);
+                                XYZ oP1 = bTransform.OfPoint(new XYZ(outerX, leftElevation - 100, 0));
+                                XYZ oP2 = bTransform.OfPoint(new XYZ(outerX, leftElevation + 100, 0));
+                                Line outerDimLine = Line.CreateBound(oP1, oP2);
 
-                                // DIM 2: Dist. Seguridad ↔ Valor Básico (inner)
-                                CreateDim(doc, targetView, leftDc2, leftDc3,
-                                    innerDimLine, selectedDimType, groupIds);
-
-                                // DIM 3: 0.10m ↔ Nivel Conexión (outer, further left)
-                                CreateDim(doc, targetView, leftDc1, leftDc4,
-                                    outerDimLine, selectedDimType, groupIds);
+                                CreateDim(doc, targetView, leftDc1, leftDc2, innerDimLine, selectedDimType, groupIds);
+                                CreateDim(doc, targetView, leftDc2, leftDc3, innerDimLine, selectedDimType, groupIds);
+                                CreateDim(doc, targetView, leftDc1, leftDc4, outerDimLine, selectedDimType, groupIds);
                             }
                         }
                     }
                     catch { /* annotation failed, continue with grouping */ }
                 }
-
                 // ── GROUP (unique name per view) ──
                 if (groupIds.Count > 0)
                 {

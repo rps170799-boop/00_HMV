@@ -1,0 +1,20 @@
+site_name: Manual de HMV Tools
+site_description: Documentación oficial y guía de usuario para los scripts de Revit de HMV.
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: blue grey
+    accent: light blue
+  features:
+    - navigation.tabs
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Inicio: index.md
+  - Herramientas DWG: dwg.md
+  - Control de Familias: family-control.md
+  - Herramientas de Anotación: annotation.md
+  - Auditoría: audit.md
