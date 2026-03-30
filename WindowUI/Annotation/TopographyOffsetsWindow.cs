@@ -22,10 +22,14 @@ namespace HMVTools
         private TextBox txtOffset3;
 
         private ComboBox cmbTextStyle;
+        private ComboBox cmbFilledRegionType;
+        private CheckBox chkMaskingRegion;
 
         public string SelectedLineStyle { get; private set; }
         public string SelectedTextStyle { get; private set; }
         public string SelectedDimensionStyle { get; private set; }
+        public string SelectedFilledRegionType { get; private set; }
+        public bool GenerateMaskingRegion { get; private set; }
 
         public double Offset1 { get; private set; }
         public double Offset2 { get; private set; }
@@ -38,14 +42,18 @@ namespace HMVTools
         private static readonly Color COL_SUB = Color.FromRgb(120, 120, 130);
         private static readonly Color COL_BTN_BG = Color.FromRgb(240, 240, 243);
 
-        public TopographyOffsetsWindow(List<string> styleNames, List<string> textStyleNames, List<string> dimStyleNames)
+        public TopographyOffsetsWindow(
+            List<string> styleNames,
+            List<string> textStyleNames,
+            List<string> dimStyleNames,
+            List<string> filledRegionTypeNames)
         {
             allStyles = styleNames;
             allDimStyles = dimStyleNames;
 
             Title = "HMV Tools - Topography to Lines (Paso 2)";
             Width = 900;
-            Height = 680;
+            Height = 760;
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(COL_BG);
@@ -56,8 +64,10 @@ namespace HMVTools
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 2 Lists
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 3 Inputs
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 4 Text Style
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 5 Info
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 6 Buttons
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 5 Filled Region Type
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 6 Masking Region
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 7 Info
+            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // 8 Buttons
 
             // ── HEADER ──
             TextBlock title = new TextBlock { Text = "2. Estilos y Desfases", FontSize = 18, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(COL_TEXT), Margin = new Thickness(0, 0, 0, 4) };
@@ -86,7 +96,7 @@ namespace HMVTools
 
             Grid.SetRow(listsContainer, 2); mainGrid.Children.Add(listsContainer);
 
-            // ── WIRE SEARCH EVENTS (FIX: both lists now filter) ──
+            // ── WIRE SEARCH EVENTS ──
             styleSearchBox.TextChanged += (s, e) =>
             {
                 string filter = styleSearchBox.Text;
@@ -116,7 +126,7 @@ namespace HMVTools
             Grid.SetRow(inputGrid, 3); mainGrid.Children.Add(inputGrid);
 
             // ── TEXT STYLE COMBOBOX ──
-            Grid textGrid = new Grid { Margin = new Thickness(0, 0, 0, 16) };
+            Grid textGrid = new Grid { Margin = new Thickness(0, 0, 0, 12) };
             textGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
             textGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
@@ -129,18 +139,47 @@ namespace HMVTools
             Grid.SetColumn(cmbTextStyle, 1); textGrid.Children.Add(cmbTextStyle);
             Grid.SetRow(textGrid, 4); mainGrid.Children.Add(textGrid);
 
+            // ── FILLED REGION TYPE COMBOBOX ──
+            Grid filledGrid = new Grid { Margin = new Thickness(0, 0, 0, 12) };
+            filledGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+            filledGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            TextBlock lblFilled = new TextBlock { Text = "Tipo de Región Rellena:", FontSize = 12, Foreground = new SolidColorBrush(COL_SUB), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 0) };
+            Grid.SetColumn(lblFilled, 0); filledGrid.Children.Add(lblFilled);
+
+            cmbFilledRegionType = new ComboBox { Height = 28, VerticalContentAlignment = VerticalAlignment.Center, FontSize = 12 };
+            cmbFilledRegionType.Items.Add("(Ninguno)");
+            foreach (var frName in filledRegionTypeNames) cmbFilledRegionType.Items.Add(frName);
+            cmbFilledRegionType.SelectedIndex = 0;
+            Grid.SetColumn(cmbFilledRegionType, 1); filledGrid.Children.Add(cmbFilledRegionType);
+            Grid.SetRow(filledGrid, 5); mainGrid.Children.Add(filledGrid);
+
+            // ── MASKING REGION CHECKBOX ──
+            chkMaskingRegion = new CheckBox
+            {
+                Content = "Generar Masking Region (debajo de la topografía)",
+                FontSize = 13,
+                Foreground = new SolidColorBrush(COL_TEXT),
+                Margin = new Thickness(0, 0, 0, 16),
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            Grid.SetRow(chkMaskingRegion, 6);
+            mainGrid.Children.Add(chkMaskingRegion);
+
             // ── INFO ──
             Border infoCard = new Border { CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Color.FromRgb(255, 250, 235)), BorderBrush = new SolidColorBrush(Color.FromRgb(255, 213, 79)), BorderThickness = new Thickness(1), Padding = new Thickness(12), Margin = new Thickness(0, 0, 0, 16) };
             TextBlock infoText = new TextBlock
             {
                 Text = "ℹ  Se crearán: línea base + desfase 0.10m (<Thin Lines>) + 3 desfases con el estilo seleccionado.\n" +
-                       "   Las dimensiones se crearán entre los desfases. Los textos se posicionarán a la izquierda.",
+                       "   Las dimensiones se crearán entre los desfases. Los textos se posicionarán a la izquierda.\n" +
+                       "   La región rellena se genera entre la línea base y el desfase de 0.10m.\n" +
+                       "   La masking region oculta todo lo que quede debajo de la topografía.",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(102, 60, 0)),
                 TextWrapping = TextWrapping.Wrap
             };
             infoCard.Child = infoText;
-            Grid.SetRow(infoCard, 5); mainGrid.Children.Add(infoCard);
+            Grid.SetRow(infoCard, 7); mainGrid.Children.Add(infoCard);
 
             // ── BUTTONS ──
             StackPanel buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
@@ -153,7 +192,7 @@ namespace HMVTools
             convertBtn.Click += ConvertBtn_Click;
             buttonPanel.Children.Add(convertBtn);
 
-            Grid.SetRow(buttonPanel, 6); mainGrid.Children.Add(buttonPanel);
+            Grid.SetRow(buttonPanel, 8); mainGrid.Children.Add(buttonPanel);
             Content = mainGrid;
         }
 
@@ -234,6 +273,12 @@ namespace HMVTools
             SelectedLineStyle = ((TextBlock)styleListBox.SelectedItem).Text;
             SelectedDimensionStyle = ((TextBlock)dimListBox.SelectedItem).Text;
             SelectedTextStyle = cmbTextStyle.SelectedItem?.ToString();
+
+            // Filled region type: null if "(Ninguno)" selected
+            string frSelection = cmbFilledRegionType.SelectedItem?.ToString();
+            SelectedFilledRegionType = (frSelection == "(Ninguno)") ? null : frSelection;
+
+            GenerateMaskingRegion = chkMaskingRegion.IsChecked == true;
 
             DialogResult = true;
             Close();

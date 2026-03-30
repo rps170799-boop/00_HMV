@@ -18,6 +18,8 @@ namespace HMVTools
             public string LineStyleName;
             public string DimStyleName;
             public string TextStyleName;
+            public string FilledRegionTypeName;
+            public bool GenerateMaskingRegion;
         }
 
         public Result Execute(
@@ -109,8 +111,18 @@ namespace HMVTools
                 }
                 dimStyleNames.Sort();
 
+                // FILLED REGION TYPES (non-masking only)
+                List<string> filledRegionTypeNames = new List<string>();
+                foreach (FilledRegionType frt in new FilteredElementCollector(doc)
+                    .OfClass(typeof(FilledRegionType)))
+                {
+                    if (!frt.IsMasking)
+                        filledRegionTypeNames.Add(frt.Name);
+                }
+                filledRegionTypeNames.Sort();
+
                 TopographyOffsetsWindow win2 = new TopographyOffsetsWindow(
-                    styleNames, textStyleNames, dimStyleNames);
+                    styleNames, textStyleNames, dimStyleNames, filledRegionTypeNames);
                 if (win2.ShowDialog() != true) return Result.Cancelled;
 
                 OffsetSettings settings = new OffsetSettings
@@ -120,7 +132,9 @@ namespace HMVTools
                     Offset3_mm = win2.Offset3,
                     LineStyleName = win2.SelectedLineStyle,
                     DimStyleName = win2.SelectedDimensionStyle,
-                    TextStyleName = win2.SelectedTextStyle
+                    TextStyleName = win2.SelectedTextStyle,
+                    FilledRegionTypeName = win2.SelectedFilledRegionType,
+                    GenerateMaskingRegion = win2.GenerateMaskingRegion
                 };
 
                 // ═══════════════════════════════════════════════════════
@@ -232,12 +246,6 @@ namespace HMVTools
         // points, project them onto the EXACT view plane to eliminate
         // floating-point drift. Without this, NewDetailCurve fails or
         // produces flat lines in sections other than the active view.
-        // ═══════════════════════════════════════════════════════════════
-        // ═══════════════════════════════════════════════════════════════
-        // CORE: Process a single view
-        // ═══════════════════════════════════════════════════════════════
-        // ═══════════════════════════════════════════════════════════════
-        // CORE: Process a single view
         // ═══════════════════════════════════════════════════════════════
         private void ProcessSingleView(
             Document doc,
@@ -473,7 +481,6 @@ namespace HMVTools
                         double startX = cropBox.Min.X;
 
                         // 2. TEXT PLACEMENT: Pushed further to the right (4.0 meters from the edge)
-                        // (Keeping this exactly as you had it, since it is OKAY)
                         double textX = startX + (2.0 * 3.28084);
 
                         XYZ textPosBottom = bTransform.OfPoint(new XYZ(textX, yMidBottom, 0));
@@ -511,15 +518,11 @@ namespace HMVTools
                             if (selectedDimType != null)
                             {
                                 // 3. DIMENSIONS ANCHORED TO TEXT & LEFT CORNER
-
-                                // Inner dims (2000, 2310) placed right next to the text (0.5m left of the text)
                                 double innerX = textX - (3.0 * 3.28084);
                                 XYZ iP1 = bTransform.OfPoint(new XYZ(innerX, leftElevation - 100, 0));
                                 XYZ iP2 = bTransform.OfPoint(new XYZ(innerX, leftElevation + 100, 0));
                                 Line innerDimLine = Line.CreateBound(iP1, iP2);
 
-                                // Outer dim (5000) dragged all the way left to exactly end at the corner 
-                                // (0.15m padding so it's visible but right against the boundary)
                                 double outerX = startX - (2.50 * 3.28084);
                                 XYZ oP1 = bTransform.OfPoint(new XYZ(outerX, leftElevation - 100, 0));
                                 XYZ oP2 = bTransform.OfPoint(new XYZ(outerX, leftElevation + 100, 0));
@@ -533,6 +536,125 @@ namespace HMVTools
                     }
                     catch { /* annotation failed, continue with grouping */ }
                 }
+
+                // ═══════════════════════════════════════════════════════
+                // FILLED REGION + MASKING REGION
+                // ═══════════════════════════════════════════════════════
+                if (generateOffsets && cropBox != null && clippedSegments.Count > 0)
+                {
+                    try
+                    {
+                        // Build ordered topo polyline (world coords, left→right)
+                        List<XYZ> topoChain = BuildOrderedTopoChain(
+                            clippedSegments, bTransform);
+
+                        if (topoChain.Count >= 2)
+                        {
+                            XYZ upDir = targetView.UpDirection;
+
+                            // ── FILLED REGION (between topo and +0.10m offset) ──
+                            if (!string.IsNullOrEmpty(settings.FilledRegionTypeName))
+                            {
+                                ElementId frtId = FindFilledRegionTypeId(
+                                    doc, settings.FilledRegionTypeName);
+
+                                if (frtId != ElementId.InvalidElementId)
+                                {
+                                    XYZ offsetVec = upDir.Multiply(dist1);
+                                    List<XYZ> offsetChain = new List<XYZ>();
+                                    foreach (XYZ pt in topoChain)
+                                        offsetChain.Add(pt + offsetVec);
+
+                                    CurveLoop loop = new CurveLoop();
+
+                                    // Bottom: topo left → right
+                                    for (int i = 0; i < topoChain.Count - 1; i++)
+                                    {
+                                        if (topoChain[i].DistanceTo(topoChain[i + 1]) > 1e-6)
+                                            loop.Append(Line.CreateBound(
+                                                topoChain[i], topoChain[i + 1]));
+                                    }
+
+                                    // Right edge: up from topo-right to offset-right
+                                    XYZ topoRight = topoChain[topoChain.Count - 1];
+                                    XYZ offRight = offsetChain[offsetChain.Count - 1];
+                                    if (topoRight.DistanceTo(offRight) > 1e-6)
+                                        loop.Append(Line.CreateBound(topoRight, offRight));
+
+                                    // Top: offset right → left
+                                    for (int i = offsetChain.Count - 1; i > 0; i--)
+                                    {
+                                        if (offsetChain[i].DistanceTo(offsetChain[i - 1]) > 1e-6)
+                                            loop.Append(Line.CreateBound(
+                                                offsetChain[i], offsetChain[i - 1]));
+                                    }
+
+                                    // Left edge: down from offset-left to topo-left
+                                    XYZ offLeft = offsetChain[0];
+                                    XYZ topoLeft = topoChain[0];
+                                    if (offLeft.DistanceTo(topoLeft) > 1e-6)
+                                        loop.Append(Line.CreateBound(offLeft, topoLeft));
+
+                                    IList<CurveLoop> loops = new List<CurveLoop> { loop };
+                                    FilledRegion fr = FilledRegion.Create(
+                                        doc, frtId, targetView.Id, loops);
+                                    if (fr != null) groupIds.Add(fr.Id);
+                                }
+                            }
+
+                            // ── MASKING REGION (below topo line) ──
+                            if (settings.GenerateMaskingRegion)
+                            {
+                                ElementId maskTypeId = FindMaskingRegionTypeId(doc);
+
+                                if (maskTypeId != ElementId.InvalidElementId)
+                                {
+                                    // Crop box bottom corners in world coords
+                                    XYZ cropBL = bTransform.OfPoint(
+                                        new XYZ(cropBox.Min.X, cropBox.Min.Y, 0));
+                                    XYZ cropBR = bTransform.OfPoint(
+                                        new XYZ(cropBox.Max.X, cropBox.Min.Y, 0));
+
+                                    // Project onto view plane to avoid drift
+                                    cropBL = ProjectOntoPlane(cropBL, origin, viewDir);
+                                    cropBR = ProjectOntoPlane(cropBR, origin, viewDir);
+
+                                    CurveLoop maskLoop = new CurveLoop();
+
+                                    // Top: topo left → right
+                                    for (int i = 0; i < topoChain.Count - 1; i++)
+                                    {
+                                        if (topoChain[i].DistanceTo(topoChain[i + 1]) > 1e-6)
+                                            maskLoop.Append(Line.CreateBound(
+                                                topoChain[i], topoChain[i + 1]));
+                                    }
+
+                                    // Right edge: down from topo-right to crop bottom-right
+                                    XYZ topoRight = topoChain[topoChain.Count - 1];
+                                    if (topoRight.DistanceTo(cropBR) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(topoRight, cropBR));
+
+                                    // Bottom: crop bottom-right → bottom-left
+                                    if (cropBR.DistanceTo(cropBL) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(cropBR, cropBL));
+
+                                    // Left edge: up from crop bottom-left to topo-left
+                                    XYZ topoLeft = topoChain[0];
+                                    if (cropBL.DistanceTo(topoLeft) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(cropBL, topoLeft));
+
+                                    IList<CurveLoop> maskLoops =
+                                        new List<CurveLoop> { maskLoop };
+                                    FilledRegion mask = FilledRegion.Create(
+                                        doc, maskTypeId, targetView.Id, maskLoops);
+                                    if (mask != null) groupIds.Add(mask.Id);
+                                }
+                            }
+                        }
+                    }
+                    catch { /* region creation failed, continue with grouping */ }
+                }
+
                 // ── GROUP (unique name per view) ──
                 if (groupIds.Count > 0)
                 {
@@ -567,6 +689,82 @@ namespace HMVTools
 
                 tx.Commit();
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // BUILD ORDERED TOPO CHAIN
+        // Sorts clipped segments left→right in local coords and chains
+        // them into an ordered list of world-coord points for boundary
+        // construction (filled region / masking region).
+        // ═══════════════════════════════════════════════════════════════
+        private List<XYZ> BuildOrderedTopoChain(
+            List<Tuple<XYZ, XYZ>> clippedSegments,
+            Transform bTransform)
+        {
+            // Orient each segment so Item1 is the leftmost point in local coords
+            var oriented = new List<Tuple<XYZ, XYZ>>();
+            foreach (var seg in clippedSegments)
+            {
+                XYZ p1L = bTransform.Inverse.OfPoint(seg.Item1);
+                XYZ p2L = bTransform.Inverse.OfPoint(seg.Item2);
+                if (p1L.X <= p2L.X)
+                    oriented.Add(seg);
+                else
+                    oriented.Add(Tuple.Create(seg.Item2, seg.Item1));
+            }
+
+            // Sort by leftmost X in local coords
+            oriented.Sort((a, b) =>
+                bTransform.Inverse.OfPoint(a.Item1).X.CompareTo(
+                bTransform.Inverse.OfPoint(b.Item1).X));
+
+            // Build chain of world-coord points
+            List<XYZ> chain = new List<XYZ>();
+            chain.Add(oriented[0].Item1);
+
+            for (int i = 0; i < oriented.Count; i++)
+            {
+                XYZ segStart = oriented[i].Item1;
+                XYZ segEnd = oriented[i].Item2;
+
+                // Bridge gap if endpoint of previous segment ≠ start of this one
+                XYZ lastPt = chain[chain.Count - 1];
+                if (lastPt.DistanceTo(segStart) > 1e-4)
+                    chain.Add(segStart);
+
+                chain.Add(segEnd);
+            }
+
+            return chain;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // FIND FILLED REGION TYPE BY NAME
+        // ═══════════════════════════════════════════════════════════════
+        private ElementId FindFilledRegionTypeId(Document doc, string name)
+        {
+            foreach (FilledRegionType frt in new FilteredElementCollector(doc)
+                .OfClass(typeof(FilledRegionType)))
+            {
+                if (frt.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return frt.Id;
+            }
+            return ElementId.InvalidElementId;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // FIND FIRST MASKING REGION TYPE
+        // In Revit API, masking regions are FilledRegionType with
+        // IsMasking == true. Returns the first one found.
+        // ═══════════════════════════════════════════════════════════════
+        private ElementId FindMaskingRegionTypeId(Document doc)
+        {
+            foreach (FilledRegionType frt in new FilteredElementCollector(doc)
+                .OfClass(typeof(FilledRegionType)))
+            {
+                if (frt.IsMasking) return frt.Id;
+            }
+            return ElementId.InvalidElementId;
         }
 
         // ═══════════════════════════════════════════════════════════════

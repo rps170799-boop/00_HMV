@@ -439,10 +439,11 @@ namespace HMVTools
 
         /// <summary>
         /// Raycasts downward across a dense sample grid within the element's
-        /// bounding box and returns the ReferenceWithContext whose Z belongs
-        /// to the most-voted elevation group.
-        /// Vote-by-frequency: the concrete top face is large → hit by MANY rays;
-        /// anchor bolt tops are tiny → hit by very FEW rays.
+        /// bounding box. Two-step filter:
+        ///   1) Group hit Z values by 5 mm tolerance, discard groups with
+        ///      less than 5% of total rays (noise: bolts, rebar tips).
+        ///   2) Among surviving groups, pick the HIGHEST Z — this selects
+        ///      the pedestal top over the footing pad.
         /// </summary>
         private ReferenceWithContext FindHighestFaceInBBox(ReferenceIntersector intersector, XYZ bbMin, XYZ bbMax, ElementId linkInstanceId, ElementId targetElementId, List<string> debugInfo)
         {
@@ -514,10 +515,11 @@ namespace HMVTools
 
             if (hitData.Count == 0) return null;
 
-            // Vote-by-frequency: group Z values by tolerance (5 mm ≈ 0.016 ft).
-            // The concrete top face is large → hit by MANY rays.
-            // Anchor bolt tops are tiny → hit by very FEW rays.
-            // Pick the Z group with the most votes.
+            // Two-step filter:
+            //   Step 1 — Group Z values by tolerance (5 mm ≈ 0.017 ft),
+            //            discard groups with < 5% of total rays (noise: bolts, rebar).
+            //   Step 2 — Among surviving groups, pick the HIGHEST Z.
+            //            This selects the pedestal top over the footing pad.
             double groupTol = 0.017; // ~5 mm in feet
             var groups = new List<KeyValuePair<double, List<ReferenceWithContext>>>(); // avgZ, hits in group
 
@@ -544,9 +546,22 @@ namespace HMVTools
                         z, new List<ReferenceWithContext> { entry.Value }));
             }
 
-            // Find group with maximum votes
-            var winner = groups.OrderByDescending(g => g.Value.Count).First();
-            debugInfo.Add($"  NTCE-vote: groups={groups.Count}, winner Z={winner.Key:F4}ft, votes={winner.Value.Count}/{hitData.Count}");
+            // Step 1: Discard noise — groups with < 5% of total ray hits
+            int minVotes = Math.Max(2, (int)(hitData.Count * 0.05));
+            var significant = groups.Where(g => g.Value.Count >= minVotes).ToList();
+
+            // Fallback: if all groups got filtered, keep the one with most votes
+            if (significant.Count == 0)
+                significant = new List<KeyValuePair<double, List<ReferenceWithContext>>>
+                    { groups.OrderByDescending(g => g.Value.Count).First() };
+
+            // Debug: log all groups so we can verify
+            foreach (var g in groups.OrderByDescending(g => g.Key))
+                debugInfo.Add($"  NTCE-group: Z={g.Key:F4}ft, votes={g.Value.Count}/{hitData.Count}{(g.Value.Count < minVotes ? " [NOISE]" : "")}");
+
+            // Step 2: Among significant groups, pick the HIGHEST Z
+            var winner = significant.OrderByDescending(g => g.Key).First();
+            debugInfo.Add($"  NTCE-winner: Z={winner.Key:F4}ft, votes={winner.Value.Count}/{hitData.Count}, threshold={minVotes}");
 
             // Return the hit with smallest proximity within the winning group
             return winner.Value.OrderBy(rwc => rwc.Proximity).First();
