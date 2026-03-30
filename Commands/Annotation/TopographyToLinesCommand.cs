@@ -111,7 +111,7 @@ namespace HMVTools
                 }
                 dimStyleNames.Sort();
 
-                // FILLED REGION TYPES (non-masking only)
+                // FILLED REGION TYPES (non-masking only, for the strip region)
                 List<string> filledRegionTypeNames = new List<string>();
                 foreach (FilledRegionType frt in new FilteredElementCollector(doc)
                     .OfClass(typeof(FilledRegionType)))
@@ -603,25 +603,53 @@ namespace HMVTools
                             }
 
                             // ── MASKING REGION (below topo line) ──
+                            // Creates a FilledRegion with type "HMV_REGIÓN_MÁSCARA"
+                            // (solid white, IsMasking = true).
+                            // Left/right/bottom edges overshoot 100mm beyond crop
+                            // so only the top edge (topo profile) is visible.
                             if (settings.GenerateMaskingRegion)
                             {
-                                ElementId maskTypeId = FindMaskingRegionTypeId(doc);
+                                ElementId maskTypeId = GetOrCreateMaskingRegionType(doc);
 
                                 if (maskTypeId != ElementId.InvalidElementId)
                                 {
-                                    // Crop box bottom corners in world coords
+                                    // 100mm overshoot beyond crop on left, right, bottom
+                                    double overshoot = 100.0 / 304.8;
+
+                                    // Extended topo endpoints: extrapolate slope beyond crop
+                                    XYZ extLeft = ExtendTopoToX(topoChain,
+                                        cropBox.Min.X - overshoot, bTransform, true);
+                                    XYZ extRight = ExtendTopoToX(topoChain,
+                                        cropBox.Max.X + overshoot, bTransform, false);
+
+                                    // Crop box bottom corners with overshoot
                                     XYZ cropBL = bTransform.OfPoint(
-                                        new XYZ(cropBox.Min.X, cropBox.Min.Y, 0));
+                                        new XYZ(cropBox.Min.X - overshoot,
+                                                cropBox.Min.Y - overshoot, 0));
                                     XYZ cropBR = bTransform.OfPoint(
-                                        new XYZ(cropBox.Max.X, cropBox.Min.Y, 0));
+                                        new XYZ(cropBox.Max.X + overshoot,
+                                                cropBox.Min.Y - overshoot, 0));
 
                                     // Project onto view plane to avoid drift
+                                    extLeft = ProjectOntoPlane(extLeft, origin, viewDir);
+                                    extRight = ProjectOntoPlane(extRight, origin, viewDir);
                                     cropBL = ProjectOntoPlane(cropBL, origin, viewDir);
                                     cropBR = ProjectOntoPlane(cropBR, origin, viewDir);
 
+                                    XYZ topoLeft = topoChain[0];
+                                    XYZ topoRight = topoChain[topoChain.Count - 1];
+
                                     CurveLoop maskLoop = new CurveLoop();
 
-                                    // Top: topo left → right
+                                    // Left edge: up from crop bottom-left to extended topo-left
+                                    if (cropBL.DistanceTo(extLeft) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(cropBL, extLeft));
+
+                                    // Extended left to actual topo-left
+                                    if (extLeft.DistanceTo(topoLeft) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(extLeft, topoLeft));
+
+                                    // Top: topo profile left → right (the only visible edge)
                                     for (int i = 0; i < topoChain.Count - 1; i++)
                                     {
                                         if (topoChain[i].DistanceTo(topoChain[i + 1]) > 1e-6)
@@ -629,19 +657,17 @@ namespace HMVTools
                                                 topoChain[i], topoChain[i + 1]));
                                     }
 
-                                    // Right edge: down from topo-right to crop bottom-right
-                                    XYZ topoRight = topoChain[topoChain.Count - 1];
-                                    if (topoRight.DistanceTo(cropBR) > 1e-6)
-                                        maskLoop.Append(Line.CreateBound(topoRight, cropBR));
+                                    // Actual topo-right to extended right
+                                    if (topoRight.DistanceTo(extRight) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(topoRight, extRight));
+
+                                    // Right edge: down from extended topo-right to crop bottom-right
+                                    if (extRight.DistanceTo(cropBR) > 1e-6)
+                                        maskLoop.Append(Line.CreateBound(extRight, cropBR));
 
                                     // Bottom: crop bottom-right → bottom-left
                                     if (cropBR.DistanceTo(cropBL) > 1e-6)
                                         maskLoop.Append(Line.CreateBound(cropBR, cropBL));
-
-                                    // Left edge: up from crop bottom-left to topo-left
-                                    XYZ topoLeft = topoChain[0];
-                                    if (cropBL.DistanceTo(topoLeft) > 1e-6)
-                                        maskLoop.Append(Line.CreateBound(cropBL, topoLeft));
 
                                     IList<CurveLoop> maskLoops =
                                         new List<CurveLoop> { maskLoop };
@@ -739,6 +765,121 @@ namespace HMVTools
         }
 
         // ═══════════════════════════════════════════════════════════════
+        // EXTEND TOPO TO X
+        // Extends the topo polyline to a target X coordinate (local)
+        // by continuing the slope of the first/last segment.
+        // Returns world-coord point on the view plane.
+        // ═══════════════════════════════════════════════════════════════
+        private XYZ ExtendTopoToX(
+            List<XYZ> topoChain, double targetLocalX,
+            Transform bTransform, bool isLeftSide)
+        {
+            XYZ ptA, ptB;
+            if (isLeftSide)
+            {
+                ptA = bTransform.Inverse.OfPoint(topoChain[0]);
+                ptB = bTransform.Inverse.OfPoint(topoChain[Math.Min(1, topoChain.Count - 1)]);
+            }
+            else
+            {
+                ptA = bTransform.Inverse.OfPoint(topoChain[Math.Max(0, topoChain.Count - 2)]);
+                ptB = bTransform.Inverse.OfPoint(topoChain[topoChain.Count - 1]);
+            }
+
+            double dx = ptB.X - ptA.X;
+            double targetY;
+            if (Math.Abs(dx) < 1e-9)
+            {
+                targetY = isLeftSide ? ptA.Y : ptB.Y;
+            }
+            else
+            {
+                double slope = (ptB.Y - ptA.Y) / dx;
+                XYZ refPt = isLeftSide ? ptA : ptB;
+                targetY = refPt.Y + slope * (targetLocalX - refPt.X);
+            }
+
+            return bTransform.OfPoint(new XYZ(targetLocalX, targetY, 0));
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // GET OR CREATE MASKING REGION TYPE "HMV_REGIÓN_MÁSCARA"
+        //
+        // Revit API cannot create a true Masking Region element.
+        // Workaround: create a FilledRegionType with solid white fill
+        // and IsMasking = true. This behaves identically to a masking
+        // region (opaque white, hides everything behind it).
+        //
+        // If the type already exists, verifies its settings are correct.
+        // If not found, duplicates an existing type and configures it.
+        // ═══════════════════════════════════════════════════════════════
+        private const string MASK_TYPE_NAME = "HMV_REGIÓN_MÁSCARA";
+
+        private ElementId GetOrCreateMaskingRegionType(Document doc)
+        {
+            // 1. Try to find existing type by name
+            foreach (FilledRegionType frt in new FilteredElementCollector(doc)
+                .OfClass(typeof(FilledRegionType)))
+            {
+                if (frt.Name.Equals(MASK_TYPE_NAME, StringComparison.OrdinalIgnoreCase))
+                {
+                    EnsureMaskingSettings(doc, frt);
+                    return frt.Id;
+                }
+            }
+
+            // 2. Not found — duplicate from any existing type
+            FilledRegionType sourceType = new FilteredElementCollector(doc)
+                .OfClass(typeof(FilledRegionType))
+                .FirstElement() as FilledRegionType;
+
+            if (sourceType == null)
+                return ElementId.InvalidElementId;
+
+            FilledRegionType newType = sourceType.Duplicate(MASK_TYPE_NAME) as FilledRegionType;
+            if (newType == null)
+                return ElementId.InvalidElementId;
+
+            EnsureMaskingSettings(doc, newType);
+            return newType.Id;
+        }
+
+        /// <summary>
+        /// Configures a FilledRegionType to behave as a masking region:
+        /// solid fill pattern, white color, IsMasking = true.
+        /// </summary>
+        private void EnsureMaskingSettings(Document doc, FilledRegionType frt)
+        {
+            // Find solid fill pattern
+            ElementId solidPatternId = ElementId.InvalidElementId;
+            foreach (FillPatternElement fpe in new FilteredElementCollector(doc)
+                .OfClass(typeof(FillPatternElement)))
+            {
+                FillPattern fp = fpe.GetFillPattern();
+                if (fp != null && fp.IsSolidFill)
+                {
+                    solidPatternId = fpe.Id;
+                    break;
+                }
+            }
+
+            Color white = new Color(255, 255, 255);
+
+            // Foreground: solid white
+            if (solidPatternId != ElementId.InvalidElementId)
+            {
+                frt.ForegroundPatternId = solidPatternId;
+                frt.ForegroundPatternColor = white;
+            }
+
+            // Background: none
+            frt.BackgroundPatternId = ElementId.InvalidElementId;
+
+            // Masking on
+            frt.IsMasking = true;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         // FIND FILLED REGION TYPE BY NAME
         // ═══════════════════════════════════════════════════════════════
         private ElementId FindFilledRegionTypeId(Document doc, string name)
@@ -748,21 +889,6 @@ namespace HMVTools
             {
                 if (frt.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
                     return frt.Id;
-            }
-            return ElementId.InvalidElementId;
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // FIND FIRST MASKING REGION TYPE
-        // In Revit API, masking regions are FilledRegionType with
-        // IsMasking == true. Returns the first one found.
-        // ═══════════════════════════════════════════════════════════════
-        private ElementId FindMaskingRegionTypeId(Document doc)
-        {
-            foreach (FilledRegionType frt in new FilteredElementCollector(doc)
-                .OfClass(typeof(FilledRegionType)))
-            {
-                if (frt.IsMasking) return frt.Id;
             }
             return ElementId.InvalidElementId;
         }
@@ -881,7 +1007,6 @@ namespace HMVTools
         // Tolerance ~0.28% slope (tighter than 0.5%):
         //   cos(0.16°) ≈ 0.999996 — preserves topo detail
         // ═══════════════════════════════════════════════════════════════
-        // Tolerance matches working Gemini value
         private const double COLLINEAR_DOT = 0.99999;
 
         private List<Tuple<XYZ, XYZ>> MergeCollinearSegments(
