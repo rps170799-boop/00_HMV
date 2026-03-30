@@ -378,7 +378,7 @@ namespace HMVTools
             BitmapImage iconSA = LoadImage("HMVTools.Resources.sheetaudit_32.png");
             if (iconSA != null) btnSA.LargeImage = iconSA;
 
-            // ── NEW: Family Audit button ──────────────────────────
+            // ── Family Audit button ──────────────────────────
             PushButtonData btnFamilyAudit = new PushButtonData(
                 "FamilyAudit",
                 "Family\nAudit",
@@ -400,6 +400,27 @@ namespace HMVTools
             btnFA.Enabled = false;
             BitmapImage iconFA = LoadImage("HMVTools.Resources.familyaudit_32.png");
             if (iconFA != null) btnFA.LargeImage = iconFA;
+
+            // ── Linked GIS Files Audit button ──────────────────────────
+            PushButtonData btnLinkAudit = new PushButtonData(
+                "LinkAudit",
+                "Link GIS\nAudit",
+                path,
+                "HMVTools.LinkedFilesAuditCommand");
+            btnLinkAudit.ToolTip = "Audit GIS and Coordinate data for all linked Revit files";
+            btnLinkAudit.LongDescription =
+                  "Extracts coordinate and site information from linked models:\n\n"
+                    + "• Link Name & Status\n"
+                    + "• GIS Coordinate System Code\n"
+                    + "• Latitude & Longitude\n"
+                    + "• Site Name defined in the link\n"
+                    + "• Angle to True North\n\n"
+                    + "The data can be viewed in a table and exported to CSV.";
+            PushButton btnLA = panelAudit.AddItem(btnLinkAudit) as PushButton;
+            BitmapImage iconLA = LoadImage("HMVTools.Resources.linkaudit_32.png");
+            if (iconLA != null) btnLA.LargeImage = iconLA;
+
+
 
             // ══════════════════════════════════════════════════════
             //  PROACTIVE TRACKING — Event subscriptions
