@@ -69,6 +69,8 @@ Herramientas para mantener la salud y el estándar del modelo.
 **View / Sheet Audit:** Renombra vistas y planos detectando duplicados.
 <br>
 **Family Audit:** Compara versiones de familias contra la nube (ADC)´.
+<br>
+**Link GIS Audit:** Permite conocer las propiedades GIS de todos los links cargados en el modelo, ademas de exportar a excel.
 
 ---
 
