@@ -209,41 +209,12 @@ namespace HMVTools
             BitmapImage iconSH = LoadImage("HMVTools.Resources.signage_32.png"); 
             if (iconSH != null) btnSH.LargeImage = iconSH;
 
+           
 
 
             // ── Annotation Tools Panel ──
             RibbonPanel panelAnnot = app.CreateRibbonPanel("HMV Tools", "Annotation Tools");
 
-            PushButtonData btnMigrate = new PushButtonData(
-                "MigrateElements",
-                "Migrate\nElements",
-                path,
-                "HMVTools.MigrateElementsCommand");
-                        btnMigrate.ToolTip = "Migrate elements and views to another open project";
-                        btnMigrate.LongDescription =
-                            "Transfers selected model elements and their associated views "
-                            + "(Floor Plans, Sections, Drafting Views, Legends) from the "
-                            + "current project to another open project file.\n\n"
-                            + "Features:\n"
-                            + "• Shared Coordinates alignment (exact world position)\n"
-                            + "• View reconstruction with matching crop region & view range\n"
-                            + "• 2-step annotation migration (Revit 2023 compatible)\n"
-                            + "• Duplicate type conflict resolution (uses destination types)\n"
-                            + "• All-or-nothing TransactionGroup for data integrity\n\n"
-                            + "Workflow:\n"
-                            + "1. Open both source and target documents in Revit.\n"
-                            + "2. Select elements in the source document.\n"
-                            + "3. Run this command, pick the target doc, and select views.\n"
-                            + "4. Review the migration report.";
-            PushButton btnMig = panelAnnot.AddItem(btnMigrate) as PushButton;
-            BitmapImage iconMig = LoadImage("HMVTools.Resources.migrate_32.png");
-            if (iconMig != null) btnMig.LargeImage = iconMig;
-
-
-
-
-
-          
 
             PushButtonData btnTopoLines = new PushButtonData(
                 "TopoToLines",
@@ -470,6 +441,37 @@ namespace HMVTools
             PushButton btnLA = panelAudit.AddItem(btnLinkAudit) as PushButton;
             BitmapImage iconLA = LoadImage("HMVTools.Resources.linkaudit_32.png");
             if (iconLA != null) btnLA.LargeImage = iconLA;
+
+
+            // ── Transfer Tools Panel ──
+            RibbonPanel panelTrans = app.CreateRibbonPanel("HMV Tools", "Transfer Tools");
+
+
+            PushButtonData btnMigrate = new PushButtonData(
+                "MigratePlans",
+                "Migrate\nElements",
+                path,
+                "HMVTools.MigrateElementsCommand");
+            btnMigrate.ToolTip = "Migrate elements and views to another open project";
+            btnMigrate.LongDescription =
+                "Transfers selected model elements and their associated views "
+                + "(Floor Plans, Sections, Drafting Views, Legends) from the "
+                + "current project to another open project file.\n\n"
+                + "Features:\n"
+                + "• Shared Coordinates alignment (exact world position)\n"
+                + "• View reconstruction with matching crop region & view range\n"
+                + "• 2-step annotation migration (Revit 2023 compatible)\n"
+                + "• Duplicate type conflict resolution (uses destination types)\n"
+                + "• All-or-nothing TransactionGroup for data integrity\n\n"
+                + "Workflow:\n"
+                + "1. Open both source and target documents in Revit.\n"
+                + "2. Select elements in the source document.\n"
+                + "3. Run this command, pick the target doc, and select views.\n"
+                + "4. Review the migration report.";
+            PushButton btnMig = panelTrans.AddItem(btnMigrate) as PushButton;
+            BitmapImage iconMig = LoadImage("HMVTools.Resources.migrate_32.png");
+            if (iconMig != null) btnMig.LargeImage = iconMig;
+
 
 
 

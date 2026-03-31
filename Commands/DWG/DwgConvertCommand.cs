@@ -4,6 +4,10 @@ using System.Linq;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.Attributes;
+using ACadSharp;
+using ACadSharp.IO;
+using AcadText = ACadSharp.Entities.TextEntity;
+using AcadMText = ACadSharp.Entities.MText;
 
 namespace HMVTools
 {
@@ -48,13 +52,9 @@ namespace HMVTools
             string font = win.SelectedFont;
 
             if (win.Action == DwgConvertAction.ConvertLines)
-            {
                 return ConvertLines(doc, view, selectedDwgs);
-            }
-            else if (win.Action == DwgConvertAction.StandardizeAll)
-            {
-                return StandardizeAll(doc, view, font);
-            }
+            else if (win.Action == DwgConvertAction.StandardizeTexts)
+                return StandardizeTexts(doc, view, selectedDwgs, font);
 
             return Result.Cancelled;
         }
@@ -128,125 +128,164 @@ namespace HMVTools
             TaskDialog.Show("HMV Tools",
                 count + " detail lines created.\n"
                 + lineStyleCache.Count + " HMV line styles used.\n\n"
-                + "Next: Partial Explode the DWG(s), then run again "
-                + "and click 'Standardize Texts'.");
+                + "Next: Select DWG(s) again and click 'Standardize Texts'.");
             return Result.Succeeded;
         }
 
-        // ========== STANDARDIZE ALL (lines + texts after Partial Explode) ==========
+        // ========== TEXTS ==========
         private static readonly double[] AllowedSizes =
             { 1.5, 2.0, 2.5, 3.0, 3.5 };
 
-        private Result StandardizeAll(Document doc, View view, string font)
+        private Result StandardizeTexts(Document doc, View view,
+            List<ImportInstance> selectedDwgs, string font)
         {
-            int lineCurveCount = 0;
             int textCount = 0;
             int purgedStyles = 0;
             int purgedTextTypes = 0;
-            var lineStyleCache = new Dictionary<string, GraphicsStyle>();
             var typeCache = new Dictionary<string, TextNoteType>();
 
-            Category linesCat = doc.Settings.Categories
-                .get_Item(BuiltInCategory.OST_Lines);
+            List<DwgTextData> allTexts = new List<DwgTextData>();
 
-            // Pre-load existing HMV line styles
-            foreach (Category subCat in linesCat.SubCategories)
+            foreach (ImportInstance dwg in selectedDwgs)
             {
-                if (subCat.Name.StartsWith("HMV_LINEA"))
+                string dwgPath = GetDwgFilePath(doc, dwg);
+
+                if (dwgPath == null || !System.IO.File.Exists(dwgPath))
                 {
-                    GraphicsStyle gs = subCat.GetGraphicsStyle(
-                        GraphicsStyleType.Projection);
-                    if (gs != null)
-                        lineStyleCache[subCat.Name] = gs;
+                    TaskDialog.Show("HMV Tools",
+                        "Cannot find DWG file on disk.\n"
+                        + "Make sure the DWG is linked (not imported) "
+                        + "or browse to the original file.");
+                    continue;
+                }
+
+                BoundingBoxXYZ revitBB = dwg.get_BoundingBox(view);
+                if (revitBB == null)
+                {
+                    TaskDialog.Show("HMV Tools",
+                        "Cannot get bounding box of DWG in current view.");
+                    continue;
+                }
+
+                try
+                {
+                    CadDocument cadDoc;
+                    using (DwgReader reader = new DwgReader(dwgPath))
+                    {
+                        cadDoc = reader.Read();
+                    }
+
+                    // Collect texts
+                    List<double[]> rawCoords = new List<double[]>();
+                    List<DwgTextData> rawTexts = new List<DwgTextData>();
+
+                    foreach (var entity in cadDoc.Entities)
+                    {
+                        CollectRawText(entity, null, rawCoords, rawTexts);
+                    }
+
+                    foreach (var entity in cadDoc.Entities)
+                    {
+                        if (entity is ACadSharp.Entities.Insert insert
+                            && insert.Block != null)
+                        {
+                            foreach (var be in insert.Block.Entities)
+                            {
+                                CollectRawText(be, insert, rawCoords, rawTexts);
+                            }
+                        }
+                    }
+
+                    if (rawTexts.Count == 0) continue;
+
+                    // Get ALL entity bounds recursively including blocks
+                    double allMinX = double.MaxValue, allMaxX = double.MinValue;
+                    double allMinY = double.MaxValue, allMaxY = double.MinValue;
+
+                    foreach (var entity in cadDoc.Entities)
+                    {
+                        CollectAllBounds(entity, cadDoc,
+                            ref allMinX, ref allMinY, ref allMaxX, ref allMaxY);
+                    }
+
+                    // Fallback to text bounds if no geometry found
+                    if (allMinX == double.MaxValue)
+                    {
+                        foreach (var rc in rawCoords)
+                        {
+                            if (rc[0] < allMinX) allMinX = rc[0];
+                            if (rc[1] < allMinY) allMinY = rc[1];
+                            if (rc[0] > allMaxX) allMaxX = rc[0];
+                            if (rc[1] > allMaxY) allMaxY = rc[1];
+                        }
+                    }
+
+                    double dwgWidth = allMaxX - allMinX;
+                    double dwgHeight = allMaxY - allMinY;
+                    double revitWidth = revitBB.Max.X - revitBB.Min.X;
+                    double revitHeight = revitBB.Max.Y - revitBB.Min.Y;
+
+                    if (dwgWidth < 0.001 || dwgHeight < 0.001) continue;
+
+                    // Proportional mapping: DWG space -> Revit space
+                    foreach (var rt in rawTexts)
+                    {
+                        double tX = (rt.Position.X - allMinX) / dwgWidth;
+                        double tY = (rt.Position.Y - allMinY) / dwgHeight;
+
+                        double revitX = revitBB.Min.X + tX * revitWidth;
+                        double revitY = revitBB.Min.Y + tY * revitHeight;
+
+                        XYZ newPos = new XYZ(revitX, revitY, 0);
+
+                        allTexts.Add(new DwgTextData(
+                            rt.Text, newPos, rt.HeightMm, 0));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    TaskDialog.Show("HMV Tools",
+                        "Error reading DWG: " + ex.Message);
+                    continue;
                 }
             }
 
-            // Pre-load existing HMV text types
-            foreach (TextNoteType tnt in new FilteredElementCollector(doc)
-                .OfClass(typeof(TextNoteType))
-                .Cast<TextNoteType>()
-                .ToList())
+            if (allTexts.Count == 0)
             {
-                if (tnt.Name.StartsWith("HMV_General_"))
-                    typeCache[tnt.Name] = tnt;
-            }
-
-            TextNoteType baseType = new FilteredElementCollector(doc)
-                .OfClass(typeof(TextNoteType))
-                .Cast<TextNoteType>()
-                .FirstOrDefault();
-
-            if (baseType == null)
-            {
-                TaskDialog.Show("HMV Tools", "No text types found in document.");
+                TaskDialog.Show("HMV Tools", "No texts found in selected DWG(s).");
                 return Result.Cancelled;
             }
 
             using (Transaction t = new Transaction(doc,
-                "Standardize Lines & Texts"))
+                "DWG Texts to Standardized Notes"))
             {
                 t.Start();
 
-                // ===== 1. STANDARDIZE DETAIL LINES (from Partial Explode) =====
-                // Re-styles DetailCurves that have DWG-imported line styles
-
-                List<DetailCurve> curves = new FilteredElementCollector(doc, view.Id)
-                    .OfClass(typeof(CurveElement))
-                    .OfType<DetailCurve>()
-                    .ToList();
-
-                foreach (DetailCurve dc in curves)
+                foreach (TextNoteType tnt in new FilteredElementCollector(doc)
+                    .OfClass(typeof(TextNoteType))
+                    .Cast<TextNoteType>())
                 {
-                    try
-                    {
-                        GraphicsStyle gs = dc.LineStyle as GraphicsStyle;
-                        if (gs == null) continue;
-                        if (gs.Name.StartsWith("HMV_LINEA")) continue;
-                        if (IsStandardRevitLineStyle(gs.Name)) continue;
-
-                        string styleName = GetHmvLineStyleName(doc, gs);
-                        if (styleName == null) continue;
-
-                        if (!lineStyleCache.TryGetValue(styleName,
-                            out GraphicsStyle hmvStyle))
-                        {
-                            hmvStyle = CreateLineStyle(
-                                doc, linesCat, gs, styleName);
-                            if (hmvStyle != null)
-                                lineStyleCache[styleName] = hmvStyle;
-                        }
-
-                        if (hmvStyle != null)
-                        {
-                            dc.LineStyle = hmvStyle;
-                            lineCurveCount++;
-                        }
-                    }
-                    catch { }
+                    if (tnt.Name.StartsWith("HMV_General_"))
+                        typeCache[tnt.Name] = tnt;
                 }
 
-                // ===== 2. STANDARDIZE TEXTS =====
+                TextNoteType baseType = new FilteredElementCollector(doc)
+                    .OfClass(typeof(TextNoteType))
+                    .Cast<TextNoteType>()
+                    .FirstOrDefault();
 
-                List<TextNote> texts = new FilteredElementCollector(doc, view.Id)
-                    .OfClass(typeof(TextNote))
-                    .Cast<TextNote>()
-                    .ToList();
+                if (baseType == null)
+                {
+                    t.RollBack();
+                    TaskDialog.Show("HMV Tools", "No text types found.");
+                    return Result.Cancelled;
+                }
 
-                foreach (TextNote tn in texts)
+                foreach (DwgTextData td in allTexts)
                 {
                     try
                     {
-                        TextNoteType currentType =
-                            doc.GetElement(tn.GetTypeId()) as TextNoteType;
-                        if (currentType == null) continue;
-                        if (currentType.Name.StartsWith("HMV_General_")) continue;
-
-                        double sizeFeet = currentType
-                            .get_Parameter(BuiltInParameter.TEXT_SIZE)
-                            .AsDouble();
-                        double sizeMm = sizeFeet * 304.8;
-                        double snapped = SnapToAllowed(sizeMm);
-
+                        double snapped = SnapToAllowed(td.HeightMm);
                         string typeName = "HMV_General_"
                             + snapped.ToString("0.0") + " " + font;
 
@@ -260,34 +299,37 @@ namespace HMVTools
                         }
 
                         if (hmvType != null)
-                            tn.ChangeTypeId(hmvType.Id);
-
-                        textCount++;
+                        {
+                            TextNote note = TextNote.Create(
+                                doc, view.Id, td.Position, td.Text, hmvType.Id);
+                            textCount++;
+                        }
                     }
                     catch { }
                 }
 
-                // ===== 3. PURGE UNUSED IMPORTED LINE STYLES =====
-                // Collect used style IDs first, then delete — never modify
-                // a live FilteredElementCollector during iteration.
+                // ===== PURGE UNUSED LINE STYLES =====
+                Category linesCat = doc.Settings.Categories
+                    .get_Item(BuiltInCategory.OST_Lines);
 
                 HashSet<ElementId> usedStyleIds = new HashSet<ElementId>();
                 foreach (CurveElement ce in new FilteredElementCollector(doc)
                     .OfClass(typeof(CurveElement))
-                    .Cast<CurveElement>()
-                    .ToList())
+                    .Cast<CurveElement>())
                 {
                     try
                     {
                         GraphicsStyle gs = ce.LineStyle as GraphicsStyle;
-                        if (gs != null)
-                            usedStyleIds.Add(gs.Id);
+                        if (gs != null) usedStyleIds.Add(gs.Id);
                     }
                     catch { }
                 }
 
-                List<ElementId> lineStyleIdsToDelete = new List<ElementId>();
+                List<Category> toRemove = new List<Category>();
+                List<Category> allSubs = new List<Category>();
                 foreach (Category sub in linesCat.SubCategories)
+                    allSubs.Add(sub);
+                foreach (Category sub in allSubs)
                 {
                     if (sub.Name.StartsWith("HMV_LINEA")) continue;
                     if (IsStandardRevitLineStyle(sub.Name)) continue;
@@ -297,41 +339,33 @@ namespace HMVTools
                     if (gs == null) continue;
 
                     if (!usedStyleIds.Contains(gs.Id))
-                        lineStyleIdsToDelete.Add(sub.Id);
+                        toRemove.Add(sub);
                 }
 
-                foreach (ElementId id in lineStyleIdsToDelete)
+                foreach (Category cat in toRemove)
                 {
-                    try { doc.Delete(id); purgedStyles++; }
+                    try { doc.Delete(cat.Id); purgedStyles++; }
                     catch { }
                 }
 
-                // ===== 4. PURGE UNUSED TEXT TYPES =====
-                // Materialize the collector to a List BEFORE calling doc.Delete
-                // inside the loop — mutating the element table while iterating
-                // a live collector is what caused the "iterator cannot proceed"
-                // crash.
-
+                // ===== PURGE UNUSED TEXT TYPES =====
                 HashSet<ElementId> usedTextTypeIds = new HashSet<ElementId>(
                     new FilteredElementCollector(doc)
                         .OfClass(typeof(TextNote))
                         .Cast<TextNote>()
-                        .Select(note => note.GetTypeId()));
+                        .Select(tn => tn.GetTypeId()));
 
-                List<ElementId> textTypeIdsToDelete = new List<ElementId>();
-                foreach (TextNoteType tnt in new FilteredElementCollector(doc)
+                List<TextNoteType> allTextTypes = new FilteredElementCollector(doc)
                     .OfClass(typeof(TextNoteType))
                     .Cast<TextNoteType>()
-                    .ToList())
+                    .ToList();
+
+                foreach (TextNoteType tnt in allTextTypes)
                 {
                     if (tnt.Name.StartsWith("HMV_General_")) continue;
                     if (usedTextTypeIds.Contains(tnt.Id)) continue;
-                    textTypeIdsToDelete.Add(tnt.Id);
-                }
 
-                foreach (ElementId id in textTypeIdsToDelete)
-                {
-                    try { doc.Delete(id); purgedTextTypes++; }
+                    try { doc.Delete(tnt.Id); purgedTextTypes++; }
                     catch { }
                 }
 
@@ -339,45 +373,259 @@ namespace HMVTools
             }
 
             TaskDialog.Show("HMV Tools",
-                "Lines standardized: " + lineCurveCount + "\n"
-                + "Texts standardized: " + textCount + "\n"
-                + "Font: " + font + "\n\n"
+                "Texts created: " + textCount + "\n"
+                + "Font: " + font + "\n"
+                + "Text types: " + typeCache.Count + " HMV types\n\n"
                 + "Cleanup:\n"
                 + "Unused line styles purged: " + purgedStyles + "\n"
                 + "Unused text types purged: " + purgedTextTypes);
             return Result.Succeeded;
         }
 
-        // ========== HELPERS ==========
-        private double SnapToAllowed(double sizeMm)
+        // ===== ACadSharp TEXT EXTRACTION =====
+
+        private void CollectRawText(ACadSharp.Entities.Entity entity,
+            ACadSharp.Entities.Insert parentInsert,
+            List<double[]> rawCoords, List<DwgTextData> rawTexts)
         {
-            double closest = AllowedSizes[0];
-            double minDiff = Math.Abs(sizeMm - closest);
-            foreach (double a in AllowedSizes)
+            string text = null;
+            double x = 0, y = 0, height = 0;
+
+            if (entity is AcadText textEnt)
             {
-                double diff = Math.Abs(sizeMm - a);
-                if (diff < minDiff) { minDiff = diff; closest = a; }
+                text = textEnt.Value;
+                x = textEnt.InsertPoint.X;
+                y = textEnt.InsertPoint.Y;
+                height = textEnt.Height;
             }
-            return closest;
+            else if (entity is AcadMText mtext)
+            {
+                text = mtext.Value;
+                text = StripMTextFormatting(text);
+                x = mtext.InsertPoint.X;
+                y = mtext.InsertPoint.Y;
+                height = mtext.Height;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            if (parentInsert != null)
+            {
+                double ix = parentInsert.InsertPoint.X;
+                double iy = parentInsert.InsertPoint.Y;
+                double scale = parentInsert.XScale;
+                double insRot = parentInsert.Rotation * Math.PI / 180.0;
+
+                double rx = x * scale * Math.Cos(insRot)
+                          - y * scale * Math.Sin(insRot) + ix;
+                double ry = x * scale * Math.Sin(insRot)
+                          + y * scale * Math.Cos(insRot) + iy;
+
+                x = rx;
+                y = ry;
+                height *= scale;
+            }
+
+            rawCoords.Add(new double[] { x, y });
+            double heightMm = height * 1000.0;
+            rawTexts.Add(new DwgTextData(text,
+                new XYZ(x, y, 0), heightMm, 0));
         }
 
-        private TextNoteType CreateTextType(Document doc,
-            TextNoteType baseType, string name, double sizeMm, string font)
+        // ===== DWG BOUNDS (RECURSIVE) =====
+
+        private void CollectAllBounds(ACadSharp.Entities.Entity entity,
+            CadDocument cadDoc,
+            ref double minX, ref double minY,
+            ref double maxX, ref double maxY)
+        {
+            if (entity is ACadSharp.Entities.Line ln)
+            {
+                UpdateBounds(ln.StartPoint.X, ln.StartPoint.Y,
+                    ref minX, ref minY, ref maxX, ref maxY);
+                UpdateBounds(ln.EndPoint.X, ln.EndPoint.Y,
+                    ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is ACadSharp.Entities.LwPolyline lw)
+            {
+                foreach (var v in lw.Vertices)
+                    UpdateBounds(v.Location.X, v.Location.Y,
+                        ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is ACadSharp.Entities.Polyline2D p2)
+            {
+                foreach (var v in p2.Vertices)
+                    UpdateBounds(v.Location.X, v.Location.Y,
+                        ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is ACadSharp.Entities.Circle circ)
+            {
+                UpdateBounds(circ.Center.X - circ.Radius, circ.Center.Y - circ.Radius,
+                    ref minX, ref minY, ref maxX, ref maxY);
+                UpdateBounds(circ.Center.X + circ.Radius, circ.Center.Y + circ.Radius,
+                    ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is ACadSharp.Entities.Arc arc)
+            {
+                UpdateBounds(arc.Center.X - arc.Radius, arc.Center.Y - arc.Radius,
+                    ref minX, ref minY, ref maxX, ref maxY);
+                UpdateBounds(arc.Center.X + arc.Radius, arc.Center.Y + arc.Radius,
+                    ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is AcadText txt)
+            {
+                UpdateBounds(txt.InsertPoint.X, txt.InsertPoint.Y,
+                    ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is AcadMText mtxt)
+            {
+                UpdateBounds(mtxt.InsertPoint.X, mtxt.InsertPoint.Y,
+                    ref minX, ref minY, ref maxX, ref maxY);
+            }
+            else if (entity is ACadSharp.Entities.Insert ins)
+            {
+                if (ins.Block != null)
+                {
+                    double ix = ins.InsertPoint.X;
+                    double iy = ins.InsertPoint.Y;
+                    double scale = ins.XScale;
+
+                    foreach (var be in ins.Block.Entities)
+                    {
+                        double beMinX = double.MaxValue, beMaxX = double.MinValue;
+                        double beMinY = double.MaxValue, beMaxY = double.MinValue;
+                        CollectAllBounds(be, cadDoc,
+                            ref beMinX, ref beMinY, ref beMaxX, ref beMaxY);
+
+                        if (beMinX != double.MaxValue)
+                        {
+                            UpdateBounds(beMinX * scale + ix, beMinY * scale + iy,
+                                ref minX, ref minY, ref maxX, ref maxY);
+                            UpdateBounds(beMaxX * scale + ix, beMaxY * scale + iy,
+                                ref minX, ref minY, ref maxX, ref maxY);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void UpdateBounds(double x, double y,
+            ref double minX, ref double minY,
+            ref double maxX, ref double maxY)
+        {
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxX) maxX = x;
+            if (y > maxY) maxY = y;
+        }
+
+        // ===== HELPERS =====
+
+        private string StripMTextFormatting(string mtext)
+        {
+            if (string.IsNullOrEmpty(mtext)) return mtext;
+
+            string result = mtext;
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result, @"\{\\[^;]+;([^}]*)}", "$1");
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result, @"\\A\d;", "");
+            result = result.Replace("\\P", "\n");
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result, @"\\[a-zA-Z][^;]*;", "");
+            result = result.Replace("{", "").Replace("}", "");
+
+            return result.Trim();
+        }
+
+        private string GetDwgFilePath(Document doc, ImportInstance import)
         {
             try
             {
-                TextNoteType nt = baseType.Duplicate(name) as TextNoteType;
-                double sizeFeet = sizeMm / 304.8;
-                nt.get_Parameter(BuiltInParameter.TEXT_SIZE).Set(sizeFeet);
-                nt.get_Parameter(BuiltInParameter.TEXT_FONT).Set(font);
-                nt.get_Parameter(BuiltInParameter.TEXT_WIDTH_SCALE).Set(1.0);
-                nt.get_Parameter(BuiltInParameter.TEXT_STYLE_BOLD).Set(0);
-                nt.get_Parameter(BuiltInParameter.TEXT_STYLE_ITALIC).Set(0);
-                nt.get_Parameter(BuiltInParameter.TEXT_BACKGROUND).Set(1);
-                return nt;
+                ElementId typeId = import.GetTypeId();
+                Element typeElem = doc.GetElement(typeId);
+                if (typeElem != null)
+                {
+                    ExternalFileReference extRef =
+                        typeElem.GetExternalFileReference();
+                    if (extRef != null)
+                    {
+                        ModelPath mp = extRef.GetPath();
+                        string path = ModelPathUtils
+                            .ConvertModelPathToUserVisiblePath(mp);
+                        if (!string.IsNullOrEmpty(path)
+                            && System.IO.File.Exists(path))
+                            return path;
+                    }
+                }
             }
-            catch { return null; }
+            catch { }
+
+            try
+            {
+                Parameter p = import.get_Parameter(
+                    BuiltInParameter.IMPORT_SYMBOL_NAME);
+                if (p != null)
+                {
+                    string name = p.AsString();
+                    string[] searchPaths = new string[]
+                    {
+                        System.IO.Path.GetDirectoryName(
+                            doc.PathName ?? ""),
+                        Environment.GetFolderPath(
+                            Environment.SpecialFolder.Desktop),
+                        Environment.GetFolderPath(
+                            Environment.SpecialFolder.MyDocuments)
+                    };
+
+                    foreach (string dir in searchPaths)
+                    {
+                        if (string.IsNullOrEmpty(dir)) continue;
+                        string full = System.IO.Path.Combine(dir, name);
+                        if (!full.EndsWith(".dwg"))
+                            full += ".dwg";
+                        if (System.IO.File.Exists(full))
+                            return full;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                Parameter p = import.get_Parameter(
+                    BuiltInParameter.IMPORT_SYMBOL_NAME);
+                string fileName = p != null ? p.AsString() : "DWG file";
+
+                var dialog = new Microsoft.Win32.OpenFileDialog();
+                dialog.Title = "Locate: " + fileName;
+                dialog.Filter = "DWG files (*.dwg)|*.dwg";
+                if (dialog.ShowDialog() == true)
+                    return dialog.FileName;
+            }
+            catch { }
+
+            return null;
         }
+
+        private class DwgTextData
+        {
+            public string Text;
+            public XYZ Position;
+            public double HeightMm;
+            public double Rotation;
+
+            public DwgTextData(string text, XYZ pos, double hMm, double rot)
+            {
+                Text = text;
+                Position = pos;
+                HeightMm = hMm;
+                Rotation = rot;
+            }
+        }
+
+        // ========== LINE HELPERS ==========
 
         private void GetCurves(Document doc, GeometryElement geoElem,
             List<(Curve curve, GraphicsStyle style)> curveData)
@@ -398,7 +646,8 @@ namespace HMVTools
                     {
                         if (pts[i].DistanceTo(pts[i + 1]) < 0.003) continue;
                         curveData.Add((
-                            Line.CreateBound(pts[i], pts[i + 1]), gs));
+                            Autodesk.Revit.DB.Line.CreateBound(
+                                pts[i], pts[i + 1]), gs));
                     }
                 }
                 else if (geoObj is GeometryInstance geoInst)
@@ -457,8 +706,38 @@ namespace HMVTools
                     newCat.SetLinePatternId(patternId,
                         GraphicsStyleType.Projection);
 
-                newCat.LineColor = new Color(0, 0, 0);
+                newCat.LineColor = new Autodesk.Revit.DB.Color(0, 0, 0);
                 return newCat.GetGraphicsStyle(GraphicsStyleType.Projection);
+            }
+            catch { return null; }
+        }
+
+        private double SnapToAllowed(double sizeMm)
+        {
+            double closest = AllowedSizes[0];
+            double minDiff = Math.Abs(sizeMm - closest);
+            foreach (double a in AllowedSizes)
+            {
+                double diff = Math.Abs(sizeMm - a);
+                if (diff < minDiff) { minDiff = diff; closest = a; }
+            }
+            return closest;
+        }
+
+        private TextNoteType CreateTextType(Document doc,
+            TextNoteType baseType, string name, double sizeMm, string font)
+        {
+            try
+            {
+                TextNoteType nt = baseType.Duplicate(name) as TextNoteType;
+                double sizeFeet = sizeMm / 304.8;
+                nt.get_Parameter(BuiltInParameter.TEXT_SIZE).Set(sizeFeet);
+                nt.get_Parameter(BuiltInParameter.TEXT_FONT).Set(font);
+                nt.get_Parameter(BuiltInParameter.TEXT_WIDTH_SCALE).Set(1.0);
+                nt.get_Parameter(BuiltInParameter.TEXT_STYLE_BOLD).Set(0);
+                nt.get_Parameter(BuiltInParameter.TEXT_STYLE_ITALIC).Set(0);
+                nt.get_Parameter(BuiltInParameter.TEXT_BACKGROUND).Set(1);
+                return nt;
             }
             catch { return null; }
         }
@@ -472,8 +751,8 @@ namespace HMVTools
                 "<Overhead>", "<Beyond>", "<Hidden>", "<Centerline>",
                 "<Demolished>", "Axis of Rotation", "Hidden Lines",
                 "Demolished", "Overhead", "Beyond", "Centerline",
-                "Líneas finas", "Líneas medias", "Líneas anchas",
-                "Líneas ocultas", "Eje de rotación", "Demolido", "Encima"
+                "Lineas finas", "Lineas medias", "Lineas anchas",
+                "Lineas ocultas", "Eje de rotacion", "Demolido", "Encima"
             };
 
             foreach (string s in standard)
@@ -488,6 +767,6 @@ namespace HMVTools
     public enum DwgConvertAction
     {
         ConvertLines,
-        StandardizeAll
+        StandardizeTexts
     }
 }

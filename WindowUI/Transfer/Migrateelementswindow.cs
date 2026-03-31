@@ -8,40 +8,13 @@ using System.Windows.Media;
 
 namespace HMVTools
 {
-    // ── Plain data classes (no Revit references) ───────────────
-
-    /// <summary>Represents an open Revit document for the target dropdown.</summary>
-    public class OpenDocEntry
-    {
-        public string Title { get; set; }
-        public string PathName { get; set; }
-        /// <summary>Index into Application.Documents for retrieval.</summary>
-        public int Index { get; set; }
-    }
-
-    /// <summary>Represents a view available for transfer.</summary>
-    public class ViewEntry
-    {
-        public int Id { get; set; }
-        public string Name { get; set; }
-        /// <summary>Grouping label: "Floor Plans", "Sections", "Drafting Views", "Legends".</summary>
-        public string Category { get; set; }
-    }
-
-    /// <summary>User selections returned to the command.</summary>
-    public class MigrationSettings
-    {
-        public int TargetDocIndex { get; set; }
-        public List<int> SelectedViewIds { get; set; } = new List<int>();
-        public bool IncludeAnnotations { get; set; } = true;
-        public bool IncludeRefMarkers { get; set; } = true;
-    }
-
     // ── Window ─────────────────────────────────────────────────
+    // Data classes (OpenDocEntry, ViewEntry, MigrationSettings)
+    // are defined in MigrationDataClasses.cs
 
     public class MigrateElementsWindow : Window
     {
-        // ── Colors (same palette as PipeAnnotationWindow) ──────
+        // Colors (same palette as PipeAnnotationWindow)
         private static readonly Color BluePrimary = Color.FromRgb(0, 120, 212);
         private static readonly Color GrayBg = Color.FromRgb(240, 240, 243);
         private static readonly Color DarkText = Color.FromRgb(30, 30, 30);
@@ -51,28 +24,22 @@ namespace HMVTools
         private static readonly Color AccentLight = Color.FromRgb(232, 243, 255);
         private static readonly Color SectionHead = Color.FromRgb(60, 60, 70);
 
-        // ── Controls ───────────────────────────────────────────
+        // Controls
         private ComboBox targetDocCombo;
         private StackPanel viewListPanel;
-        private ScrollViewer viewScrollViewer;
         private CheckBox chkAnnotations;
         private CheckBox chkRefMarkers;
         private TextBlock statusText;
 
-        // ── Data ───────────────────────────────────────────────
+        // Data
         private readonly List<OpenDocEntry> openDocs;
         private readonly List<ViewEntry> sourceViews;
         private readonly string sourceTitle;
         private readonly int elementCount;
-
-        /// <summary>Maps ViewEntry.Id → CheckBox for retrieval.</summary>
         private readonly Dictionary<int, CheckBox> viewCheckBoxes
             = new Dictionary<int, CheckBox>();
 
-        /// <summary>Result — null if cancelled.</summary>
         public MigrationSettings Settings { get; private set; }
-
-        // ── Constructor ────────────────────────────────────────
 
         public MigrateElementsWindow(
             string sourceDocTitle,
@@ -101,14 +68,14 @@ namespace HMVTools
         {
             var root = new Grid { Margin = new Thickness(22) };
 
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 0 Title
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 1 Source info
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 2 Target combo
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 3 "Views" label
-            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });// 4 View list
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 5 Options
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 6 Status
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                     // 7 Buttons
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 0 Title
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 1 Source info
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 2 Target combo
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 3 "Views" label
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 4 View list
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 5 Options
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 6 Status
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 7 Buttons
 
             // ── 0: Title ───────────────────────────────────────
             var title = new TextBlock
@@ -132,15 +99,18 @@ namespace HMVTools
             };
             infoBorder.Child = new TextBlock
             {
-                Text = $"Source:  {sourceTitle}   ·   {elementCount} element{(elementCount != 1 ? "s" : "")} selected",
+                Text = elementCount > 0
+                    ? $"Source:  {sourceTitle}   ·   {elementCount} element{(elementCount != 1 ? "s" : "")} selected"
+                    : $"Source:  {sourceTitle}   ·   Views-only migration",
                 FontSize = 12,
-                Foreground = new SolidColorBrush(Color.FromRgb(30, 80, 160))
+                Foreground = new SolidColorBrush(
+                    Color.FromRgb(30, 80, 160))
             };
             Grid.SetRow(infoBorder, 1);
             root.Children.Add(infoBorder);
 
             // ── 2: Target document combo ───────────────────────
-            var targetLabel = new TextBlock
+            var tgtLabel = new TextBlock
             {
                 Text = "Target Document",
                 FontSize = 12,
@@ -173,13 +143,13 @@ namespace HMVTools
 
             comboBorder.Child = targetDocCombo;
 
-            var targetStack = new StackPanel { Margin = new Thickness(0) };
-            targetStack.Children.Add(targetLabel);
-            targetStack.Children.Add(comboBorder);
-            Grid.SetRow(targetStack, 2);
-            root.Children.Add(targetStack);
+            var tgtStack = new StackPanel();
+            tgtStack.Children.Add(tgtLabel);
+            tgtStack.Children.Add(comboBorder);
+            Grid.SetRow(tgtStack, 2);
+            root.Children.Add(tgtStack);
 
-            // ── 3: "Views to Transfer" label ───────────────────
+            // ── 3: "Views" label ───────────────────────────────
             var viewsLabel = new TextBlock
             {
                 Text = "Views to Transfer",
@@ -190,7 +160,7 @@ namespace HMVTools
             Grid.SetRow(viewsLabel, 3);
             root.Children.Add(viewsLabel);
 
-            // ── 4: View checklist (scrollable) ─────────────────
+            // ── 4: View checklist ──────────────────────────────
             var listBorder = new Border
             {
                 CornerRadius = new CornerRadius(8),
@@ -201,19 +171,20 @@ namespace HMVTools
             };
 
             viewListPanel = new StackPanel { Margin = new Thickness(4) };
-            viewScrollViewer = new ScrollViewer
+            var scroll = new ScrollViewer
             {
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 Content = viewListPanel
             };
-            listBorder.Child = viewScrollViewer;
+            listBorder.Child = scroll;
             Grid.SetRow(listBorder, 4);
             root.Children.Add(listBorder);
 
             PopulateViewList();
 
             // ── 5: Options ─────────────────────────────────────
-            var optPanel = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+            var optPanel = new StackPanel
+            { Margin = new Thickness(0, 0, 0, 8) };
 
             chkAnnotations = new CheckBox
             {
@@ -224,17 +195,16 @@ namespace HMVTools
             };
             chkRefMarkers = new CheckBox
             {
-                Content = "  Recreate reference markers (sections / callouts)",
+                Content = "  Identify reference markers for manual recreation",
                 IsChecked = true,
                 FontSize = 12
             };
             optPanel.Children.Add(chkAnnotations);
             optPanel.Children.Add(chkRefMarkers);
-
             Grid.SetRow(optPanel, 5);
             root.Children.Add(optPanel);
 
-            // ── 6: Status line ─────────────────────────────────
+            // ── 6: Status ──────────────────────────────────────
             statusText = new TextBlock
             {
                 Text = "",
@@ -244,7 +214,6 @@ namespace HMVTools
             };
             Grid.SetRow(statusText, 6);
             root.Children.Add(statusText);
-
             UpdateStatus();
 
             // ── 7: Buttons ─────────────────────────────────────
@@ -254,12 +223,15 @@ namespace HMVTools
                 HorizontalAlignment = HorizontalAlignment.Right
             };
 
-            var cancelBtn = CreateButton("Cancel", GrayBg, Color.FromRgb(60, 60, 60));
+            var cancelBtn = CreateButton("Cancel", GrayBg,
+                Color.FromRgb(60, 60, 60));
             cancelBtn.Width = 90;
             cancelBtn.Margin = new Thickness(0, 0, 8, 0);
-            cancelBtn.Click += (s, e) => { DialogResult = false; Close(); };
+            cancelBtn.Click += (s, e) =>
+            { DialogResult = false; Close(); };
 
-            var migrateBtn = CreateButton("Migrate", BluePrimary, Colors.White);
+            var migrateBtn = CreateButton("Migrate", BluePrimary,
+                Colors.White);
             migrateBtn.Width = 140;
             migrateBtn.Click += (s, e) => Accept();
 
@@ -271,79 +243,72 @@ namespace HMVTools
             return root;
         }
 
-        // ── View list population ───────────────────────────────
+        // ── View list ──────────────────────────────────────────
 
         private void PopulateViewList()
         {
             viewListPanel.Children.Clear();
             viewCheckBoxes.Clear();
 
-            // Group by category, preserve order
             var groups = sourceViews
                 .GroupBy(v => v.Category)
-                .OrderBy(g => CategorySortOrder(g.Key));
+                .OrderBy(g => CategoryOrder(g.Key));
 
-            foreach (var group in groups)
+            foreach (var grp in groups)
             {
-                // ── Category header with "select all" toggle ───
-                var headerCheck = new CheckBox
+                var catViews = grp.ToList();
+
+                var header = new CheckBox
                 {
                     IsChecked = false,
                     FontSize = 13,
                     FontWeight = FontWeights.SemiBold,
                     Foreground = new SolidColorBrush(SectionHead),
                     Margin = new Thickness(4, 8, 0, 2),
-                    Content = $"  {group.Key}  ({group.Count()})"
+                    Content = $"  {grp.Key}  ({catViews.Count})"
                 };
+                header.Checked += (s, e) => SetCat(catViews, true);
+                header.Unchecked += (s, e) => SetCat(catViews, false);
+                viewListPanel.Children.Add(header);
 
-                // Capture for closure
-                var categoryViews = group.ToList();
-                headerCheck.Checked += (s, e) => SetCategoryChecked(categoryViews, true);
-                headerCheck.Unchecked += (s, e) => SetCategoryChecked(categoryViews, false);
-
-                viewListPanel.Children.Add(headerCheck);
-
-                // ── Individual view checkboxes ─────────────────
-                foreach (var view in group.OrderBy(v => v.Name))
+                foreach (var v in catViews.OrderBy(x => x.Name))
                 {
                     var cb = new CheckBox
                     {
-                        Content = $"  {view.Name}",
-                        Tag = view.Id,
+                        Content = $"  {v.Name}",
+                        Tag = v.Id,
                         FontSize = 12,
                         Margin = new Thickness(22, 2, 0, 2),
                         Foreground = new SolidColorBrush(DarkText)
                     };
                     cb.Checked += (s, e) => UpdateStatus();
                     cb.Unchecked += (s, e) => UpdateStatus();
-
-                    viewCheckBoxes[view.Id] = cb;
+                    viewCheckBoxes[v.Id] = cb;
                     viewListPanel.Children.Add(cb);
                 }
             }
         }
 
-        private void SetCategoryChecked(List<ViewEntry> views, bool isChecked)
+        private void SetCat(List<ViewEntry> views, bool val)
         {
             foreach (var v in views)
-            {
-                if (viewCheckBoxes.TryGetValue(v.Id, out CheckBox cb))
-                    cb.IsChecked = isChecked;
-            }
+                if (viewCheckBoxes.TryGetValue(v.Id, out var cb))
+                    cb.IsChecked = val;
             UpdateStatus();
         }
 
         private void UpdateStatus()
         {
-            int count = viewCheckBoxes.Values.Count(cb => cb.IsChecked == true);
-            statusText.Text = count == 0
+            int n = viewCheckBoxes.Values
+                .Count(c => c.IsChecked == true);
+            statusText.Text = n == 0
                 ? "No views selected — only 3D elements will be copied."
-                : $"{count} view{(count != 1 ? "s" : "")} selected for transfer.";
+                : $"{n} view{(n != 1 ? "s" : "")} selected for transfer.";
         }
 
-        private int CategorySortOrder(string cat)
+        private int CategoryOrder(string c)
         {
-            switch (cat)
+            switch (c)
             {
                 case "Floor Plans": return 0;
                 case "Ceiling Plans": return 1;
@@ -365,15 +330,12 @@ namespace HMVTools
                 return;
             }
 
-            var selectedIds = viewCheckBoxes
-                .Where(kv => kv.Value.IsChecked == true)
-                .Select(kv => kv.Key)
-                .ToList();
-
             Settings = new MigrationSettings
             {
                 TargetDocIndex = targetDocCombo.SelectedIndex,
-                SelectedViewIds = selectedIds,
+                SelectedViewIds = viewCheckBoxes
+                    .Where(kv => kv.Value.IsChecked == true)
+                    .Select(kv => kv.Key).ToList(),
                 IncludeAnnotations = chkAnnotations.IsChecked == true,
                 IncludeRefMarkers = chkRefMarkers.IsChecked == true
             };
@@ -382,39 +344,44 @@ namespace HMVTools
             Close();
         }
 
-        // ── UI helpers (same as PipeAnnotationWindow) ──────────
+        // ── UI helpers ─────────────────────────────────────────
 
-        private Button CreateButton(string text, Color bgColor, Color fgColor)
+        private Button CreateButton(string text,
+            Color bg, Color fg)
         {
             var btn = new Button
             {
                 Content = text,
                 Height = 36,
                 FontSize = 13,
-                Foreground = new SolidColorBrush(fgColor),
-                Background = new SolidColorBrush(bgColor),
+                Foreground = new SolidColorBrush(fg),
+                Background = new SolidColorBrush(bg),
                 BorderThickness = new Thickness(0),
                 Cursor = Cursors.Hand
             };
-            btn.Template = GetRoundButtonTemplate(bgColor);
+            btn.Template = RoundTemplate(bg);
             return btn;
         }
 
-        private ControlTemplate GetRoundButtonTemplate(Color bgColor)
+        private ControlTemplate RoundTemplate(Color bg)
         {
-            var template = new ControlTemplate(typeof(Button));
-            var border = new FrameworkElementFactory(typeof(Border));
-            border.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
-            border.SetValue(Border.BackgroundProperty, new SolidColorBrush(bgColor));
-            border.SetValue(Border.PaddingProperty, new Thickness(14, 6, 14, 6));
-
-            var content = new FrameworkElementFactory(typeof(ContentPresenter));
-            content.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-            content.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-
-            border.AppendChild(content);
-            template.VisualTree = border;
-            return template;
+            var t = new ControlTemplate(typeof(Button));
+            var b = new FrameworkElementFactory(typeof(Border));
+            b.SetValue(Border.CornerRadiusProperty,
+                new CornerRadius(6));
+            b.SetValue(Border.BackgroundProperty,
+                new SolidColorBrush(bg));
+            b.SetValue(Border.PaddingProperty,
+                new Thickness(14, 6, 14, 6));
+            var c = new FrameworkElementFactory(
+                typeof(ContentPresenter));
+            c.SetValue(ContentPresenter.HorizontalAlignmentProperty,
+                HorizontalAlignment.Center);
+            c.SetValue(ContentPresenter.VerticalAlignmentProperty,
+                VerticalAlignment.Center);
+            b.AppendChild(c);
+            t.VisualTree = b;
+            return t;
         }
     }
 }

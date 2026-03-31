@@ -4,7 +4,6 @@ using System.Linq;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
-using Autodesk.Revit.UI.Selection;
 
 namespace HMVTools
 {
@@ -19,50 +18,22 @@ namespace HMVTools
             UIApplication uiApp = commandData.Application;
             UIDocument uiDoc = uiApp.ActiveUIDocument;
             Document srcDoc = uiDoc.Document;
-
+            // Allow running with no elements (views-only migration)
+            ICollection<ElementId> selectedIds =
+                uiDoc.Selection.GetElementIds();
             // ═══════════════════════════════════════════════════
-            //  1. GATHER SELECTION
-            // ═══════════════════════════════════════════════════
-
-            ICollection<ElementId> selectedIds = uiDoc.Selection
-                .GetElementIds();
-
-            if (selectedIds.Count == 0)
-            {
-                // Prompt user to select
-                try
-                {
-                    var refs = uiDoc.Selection.PickObjects(
-                        ObjectType.Element,
-                        "Select elements to migrate, then press Finish.");
-                    selectedIds = refs.Select(r => r.ElementId).ToList();
-                }
-                catch (Autodesk.Revit.Exceptions.OperationCanceledException)
-                {
-                    return Result.Cancelled;
-                }
-            }
-
-            if (selectedIds.Count == 0)
-            {
-                TaskDialog.Show("HMV Tools", "No elements selected.");
-                return Result.Cancelled;
-            }
-
-            // ═══════════════════════════════════════════════════
-            //  2. BUILD WINDOW DATA (plain classes, no Revit refs)
+            //  2. BUILD WINDOW DATA
             // ═══════════════════════════════════════════════════
 
-            // 2a. Open documents (exclude active)
             var openDocs = new List<OpenDocEntry>();
             var docList = new List<Document>();
 
             int idx = 0;
             foreach (Document doc in uiApp.Application.Documents)
             {
-                if (doc.IsLinked) { idx++; continue; }
-                if (doc.PathName == srcDoc.PathName) { idx++; continue; }
-                if (doc.IsFamilyDocument) { idx++; continue; }
+                if (doc.IsLinked || doc.IsFamilyDocument
+                    || doc.PathName == srcDoc.PathName)
+                { idx++; continue; }
 
                 openDocs.Add(new OpenDocEntry
                 {
@@ -82,7 +53,6 @@ namespace HMVTools
                 return Result.Cancelled;
             }
 
-            // 2b. Collect transferable views from source
             var viewEntries = CollectTransferableViews(srcDoc);
 
             // ═══════════════════════════════════════════════════
@@ -91,12 +61,11 @@ namespace HMVTools
 
             var win = new MigrateElementsWindow(
                 srcDoc.Title,
-                selectedIds.Count,
+                selectedIds != null ? selectedIds.Count : 0,
                 openDocs,
                 viewEntries);
 
-            bool? dialogResult = win.ShowDialog();
-            if (dialogResult != true || win.Settings == null)
+            if (win.ShowDialog() != true || win.Settings == null)
                 return Result.Cancelled;
 
             MigrationSettings settings = win.Settings;
@@ -113,138 +82,130 @@ namespace HMVTools
 
             if (tgtDoc == null)
             {
-                TaskDialog.Show("HMV Tools", "Could not resolve target document.");
+                TaskDialog.Show("HMV Tools",
+                    "Could not resolve target document.");
                 return Result.Failed;
             }
 
             // ═══════════════════════════════════════════════════
-            //  4. COMPUTE SHARED COORDINATE TRANSFORM
+            //  4. SHARED COORDINATE TRANSFORM
             // ═══════════════════════════════════════════════════
 
             Transform coordTransform =
-                TransferManager.ComputeSharedCoordinateTransform(srcDoc, tgtDoc);
+                TransferManager.ComputeSharedCoordinateTransform(
+                    srcDoc, tgtDoc);
 
             string warning;
-            if (!TransferManager.ValidateTransform(coordTransform, out warning)
+            if (!TransferManager.ValidateTransform(
+                    coordTransform, out warning)
                 && warning != null)
             {
-                var td = new TaskDialog("HMV Tools – Coordinate Warning");
-                td.MainInstruction = "Shared coordinates issue detected";
+                var td = new TaskDialog(
+                    "HMV Tools – Coordinate Warning");
+                td.MainInstruction =
+                    "Shared coordinates issue detected";
                 td.MainContent = warning
                     + "\n\nDo you want to proceed anyway?";
-                td.CommonButtons = TaskDialogCommonButtons.Yes
-                                 | TaskDialogCommonButtons.No;
+                td.CommonButtons =
+                    TaskDialogCommonButtons.Yes
+                    | TaskDialogCommonButtons.No;
                 if (td.Show() != TaskDialogResult.Yes)
                     return Result.Cancelled;
             }
             else if (warning != null)
             {
-                // Non-fatal warning (e.g. large offset)
                 TaskDialog.Show("HMV Tools – Warning", warning);
             }
 
             // ═══════════════════════════════════════════════════
-            //  5. EXECUTE MIGRATION IN TRANSACTION GROUP
+            //  5. EXECUTE MIGRATION (TransactionGroup)
             // ═══════════════════════════════════════════════════
 
             var result = new TransferResult();
 
-            using (var tg = new TransactionGroup(tgtDoc, "Migrate Elements"))
+            using (var tg = new TransactionGroup(
+                tgtDoc, "HMV – Migrate Elements"))
             {
                 tg.Start();
 
                 try
                 {
                     // ── 5a. Copy 3D model elements ─────────────
-                    TransferManager.CopyModelElements(
-                        srcDoc, tgtDoc, selectedIds,
-                        coordTransform, result);
-
-                    // ── 5b. Recreate selected views ────────────
-                    var viewMap = new Dictionary<ElementId, View>();
-
-                    foreach (int viewIdInt in settings.SelectedViewIds)
-                    {
-                        var srcViewId = new ElementId(viewIdInt);
-                        View srcView = srcDoc.GetElement(srcViewId) as View;
-                        if (srcView == null)
-                        {
-                            result.Warnings.Add(
-                                $"Source view Id {viewIdInt} not found, skipped.");
-                            continue;
-                        }
-
-                        View newView = TransferManager.RecreateView(
-                            srcDoc, tgtDoc, srcView,
+                    ICollection<ElementId> copiedModelIds =
+                        TransferManager.CopyModelElements(
+                            srcDoc, tgtDoc, selectedIds,
                             coordTransform, result);
 
-                        if (newView != null)
-                            viewMap[srcViewId] = newView;
-                    }
+                    // ── 5c. Copy views (doc-to-doc) ────────────
+                    var viewIdsToCopy = settings.SelectedViewIds
+                        .Select(id => new ElementId(id))
+                        .ToList();
 
-                    // ── 5c. Copy annotations (2-step) ──────────
-                    if (settings.IncludeAnnotations)
+                    Dictionary<ElementId, ElementId> viewMap =
+                        TransferManager.CopyViews(
+                            srcDoc, tgtDoc,
+                            viewIdsToCopy,
+                            coordTransform, result);
+
+                    // ── 5c. Copy & assign view templates ───────
+                    if (viewMap.Count > 0)
                     {
-                        foreach (var kvp in viewMap)
-                        {
-                            View srcView = srcDoc.GetElement(kvp.Key) as View;
-                            View tgtView = kvp.Value;
-
-                            if (srcView == null || tgtView == null) continue;
-
-                            // For plans/sections, annotations may need
-                            // the coordinate transform; for drafting/legend
-                            // they were already copied in RecreateView.
-                            bool is2D =
-                                srcView.ViewType == ViewType.DraftingView
-                                || srcView.ViewType == ViewType.Legend;
-
-                            if (!is2D)
-                            {
-                                TransferManager.CopyViewAnnotations(
-                                    srcDoc, tgtDoc,
-                                    srcView, tgtView,
-                                    Transform.Identity,
-                                    result);
-                            }
-                        }
+                        TransferManager.CopyAndAssignViewTemplates(
+                            srcDoc, tgtDoc, viewMap, result);
+                    }
+                    // ── 5d. Copy view annotations (2nd pass) ───
+                    if (viewMap.Count > 0 && settings.IncludeAnnotations)
+                    {
+                        TransferManager.CopyViewAnnotations(
+                            srcDoc, tgtDoc, viewMap, result);
+                    }
+                    // ── 5e. Copy category graphic overrides ────
+                    if (viewMap.Count > 0)
+                    {
+                        TransferManager.CopyCategoryOverrides(
+                            srcDoc, tgtDoc, viewMap, result);
                     }
 
-                    // ── 5d. Reference markers ──────────────────
+                    // ── 5d. Reference markers (informational) ──
                     if (settings.IncludeRefMarkers)
                     {
                         foreach (var kvp in viewMap)
                         {
-                            View srcView = srcDoc.GetElement(kvp.Key) as View;
+                            View srcView = srcDoc.GetElement(
+                                kvp.Key) as View;
                             if (srcView == null) continue;
 
                             var markers = TransferManager
-                                .IdentifyReferenceMarkers(srcDoc, srcView);
+                                .IdentifyReferenceMarkers(
+                                    srcDoc, srcView);
 
                             foreach (var m in markers)
                             {
                                 result.Warnings.Add(
-                                    $"Ref marker noted (manual recreation may be needed): {m}");
-                                result.RefMarkersCreated++;
+                                    "Ref marker (manual recreation "
+                                    + $"may be needed): {m}");
+                                result.RefMarkersNoted++;
                             }
                         }
                     }
 
-                    // All succeeded — commit the group
                     tg.Assimilate();
                 }
                 catch (Exception ex)
                 {
                     tg.RollBack();
-                    result.Errors.Add($"Fatal error — all changes rolled back: {ex.Message}");
+                    result.Errors.Add(
+                        "Fatal — all changes rolled back: "
+                        + ex.Message);
                 }
             }
 
             // ═══════════════════════════════════════════════════
-            //  6. SHOW REPORT
+            //  6. REPORT
             // ═══════════════════════════════════════════════════
 
-            var report = new TaskDialog("HMV Tools – Migration Complete");
+            var report = new TaskDialog(
+                "HMV Tools – Migration Complete");
             report.MainInstruction = result.Errors.Count == 0
                 ? "Migration completed successfully"
                 : "Migration completed with errors";
@@ -258,14 +219,9 @@ namespace HMVTools
         }
 
         // ═══════════════════════════════════════════════════════
-        //  HELPERS
-        // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        /// Collects all Floor Plans, Sections, Drafting Views, and
-        /// Legends from the source document into plain ViewEntry
-        /// objects for the UI.
-        /// </summary>
+
+
         private List<ViewEntry> CollectTransferableViews(Document doc)
         {
             var entries = new List<ViewEntry>();
@@ -295,7 +251,6 @@ namespace HMVTools
                         category = "Ceiling Plans"; break;
                     case ViewType.Section:
                     case ViewType.Detail:
-                        category = "Sections"; break;
                     case ViewType.Elevation:
                         category = "Sections"; break;
                     case ViewType.DraftingView:

@@ -172,7 +172,7 @@ namespace HMVTools
             var textsBtn = CreateButton("Standardize All",
                 Color.FromRgb(40, 167, 69),
                 Color.FromRgb(255, 255, 255));
-            textsBtn.Click += (s, e) => AcceptWith(DwgConvertAction.StandardizeAll);
+           
             textsBtn.Width = 150;
 
             buttonPanel.Children.Add(cancelBtn);
