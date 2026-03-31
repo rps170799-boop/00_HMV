@@ -115,6 +115,7 @@
     <Compile Include="App.cs" />
     <Compile Include="Commands\Annotation\AlignSpotElevationsCommand.cs" />
     <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
+    <Compile Include="Commands\Annotation\Migrateelementscommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
     <Compile Include="Commands\Audit\Auditfamiliescommand.cs" />
     <Compile Include="Commands\Audit\Dimensionauditcommand.cs" />
@@ -125,7 +126,10 @@
     <Compile Include="Commands\FamilyControl\Foundationlayoutcommand.cs" />
     <Compile Include="Commands\FamilyControl\MultiParamEditorCommand.cs" />
     <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
+    <Compile Include="Commands\FamilyControl\SignageHostingCommand.cs" />
+    <Compile Include="Transfermanager.cs" />
     <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
+    <Compile Include="WindowUI\Annotation\Migrateelementswindow.cs" />
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
     <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
     <Compile Include="WindowUI\Annotation\TopographyOffsetsWindow.cs" />
@@ -157,6 +161,7 @@
     <Compile Include="WindowUI\FamilyControl\MultiParamEditorWindow.cs" />
     <Compile Include="WindowUI\FamilyControl\MultiParamModeWindow.cs" />
     <Compile Include="WindowUI\FamilyControl\Refreshztofloorwindow.cs" />
+    <Compile Include="WindowUI\FamilyControl\SignageHostingWindow.cs" />
     <Compile Include="WindowUI\Familytraceabilitymanager.cs" />
   </ItemGroup>
   <ItemGroup>
