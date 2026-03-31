@@ -35,6 +35,22 @@ namespace HMVTools
 
                 if (linkDoc != null)
                 {
+                    // --- THE FIXED DESCRIPTION LOGIC ---
+                    Parameter descParam = linkDoc.ProjectInformation.LookupParameter("BuildingDescription");
+                    if (descParam != null && descParam.HasValue)
+                    {
+                        data.BuildingDescription = descParam.AsString();
+                    }
+                    else
+                    {
+                        data.BuildingDescription = "N/A";
+                    }
+
+                    // --- YOUR ORIGINAL WORKING BUILDING NAME CODE ---
+                    string bName = linkDoc.ProjectInformation.BuildingName;
+                    data.BuildingName = string.IsNullOrEmpty(bName) ? "N/A" : bName;
+
+
                     // Get Site Location (Lat/Long/GIS)
                     SiteLocation site = linkDoc.SiteLocation;
 
@@ -52,21 +68,69 @@ namespace HMVTools
                     ProjectPosition position = linkDoc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero);
                     double angleDegrees = position.Angle * 180 / Math.PI;
                     data.TrueNorthAngle = angleDegrees.ToString("F2") + "°";
+
+                    Element pbp = new FilteredElementCollector(linkDoc)
+                        .OfCategory(BuiltInCategory.OST_ProjectBasePoint)
+                        .WhereElementIsNotElementType()
+                        .FirstOrDefault();
+                    if (pbp != null)
+                    {
+                        string ns = SafeParamString(pbp, BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM);
+                        string ew = SafeParamString(pbp, BuiltInParameter.BASEPOINT_EASTWEST_PARAM);
+                        string elev = SafeParamString(pbp, BuiltInParameter.BASEPOINT_ELEVATION_PARAM);
+
+                        // Fallback if all params came back N/A
+                        if (ns == "N/A" && ew == "N/A" && elev == "N/A")
+                        {
+                            ProjectPosition pp = linkDoc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero);
+                            double nsM = pp.NorthSouth * 0.3048;
+                            double ewM = pp.EastWest * 0.3048;
+                            double elevM = pp.Elevation * 0.3048;
+                            data.ProjectBasePoint = $"N/S: {nsM:F3} m, E/W: {ewM:F3} m, Elev: {elevM:F3} m";
+                        }
+                        else
+                        {
+                            data.ProjectBasePoint = $"N/S: {ns}, E/W: {ew}, Elev: {elev}";
+                        }
+                    }
+
+                    Element sp = new FilteredElementCollector(linkDoc)
+                        .OfCategory(BuiltInCategory.OST_SharedBasePoint)
+                        .WhereElementIsNotElementType()
+                        .FirstOrDefault();
+                    if (sp != null)
+                    {
+                        string ns = SafeParamString(sp, BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM);
+                        string ew = SafeParamString(sp, BuiltInParameter.BASEPOINT_EASTWEST_PARAM);
+                        string elev = SafeParamString(sp, BuiltInParameter.BASEPOINT_ELEVATION_PARAM);
+                        data.SurveyPoint = $"N/S: {ns}, E/W: {ew}, Elev: {elev}";
+                    }
+
                 }
                 else
                 {
+                    data.BuildingDescription = "UNLOADED";
+                    data.BuildingName = "UNLOADED";
                     data.GisCode = "N/A";
                     data.Latitude = "N/A";
                     data.Longitude = "N/A";
                     data.SiteName = "UNLOADED";
                     data.TrueNorthAngle = "N/A";
+                    data.ProjectBasePoint = "N/A";
+                    data.SurveyPoint = "N/A";
                 }
 
                 auditResults.Add(data);
             }
 
+            string hostName = doc.Title;
+            if (hostName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+            {
+                hostName = hostName.Substring(0, hostName.Length - 4);
+            }
+
             // 2. Open the customized WPF UI
-            var window = new LinkedFilesAuditWindow(auditResults);
+            var window = new LinkedFilesAuditWindow(auditResults, hostName);
 
             // Ensures the WPF window behaves properly as a child of the Revit main window
             System.Windows.Interop.WindowInteropHelper helper = new System.Windows.Interop.WindowInteropHelper(window);
@@ -76,16 +140,43 @@ namespace HMVTools
 
             return Result.Succeeded;
         }
+
+        private string SafeParamString(Element el, BuiltInParameter bip)
+        {
+            if (el == null) return "N/A";
+            Parameter p = el.get_Parameter(bip);
+            if (p == null) return "N/A";
+
+            // Try display string first
+            if (p.HasValue)
+            {
+                string vs = p.AsValueString();
+                if (!string.IsNullOrEmpty(vs)) return vs;
+
+                // Fallback: read as double and format in document units
+                if (p.StorageType == StorageType.Double)
+                {
+                    double feet = p.AsDouble();
+                    double meters = feet * 0.3048;
+                    return meters.ToString("F3") + " m";
+                }
+            }
+            return "N/A";
+        }
     }
 
-    // Data Class
+    // Data Class (Property order correctly updated here too!)
     public class LinkAuditData
     {
         public string LinkName { get; set; }
+        public string BuildingDescription { get; set; }
+        public string BuildingName { get; set; }
         public string GisCode { get; set; }
         public string Latitude { get; set; }
         public string Longitude { get; set; }
         public string SiteName { get; set; }
         public string TrueNorthAngle { get; set; }
+        public string ProjectBasePoint { get; set; }
+        public string SurveyPoint { get; set; }
     }
 }

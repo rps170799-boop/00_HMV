@@ -28,7 +28,7 @@ namespace HMVTools
         public MultiParamModeWindow(List<string> familyNames)
         {
             Title = "HMV Tools – Parameter Edit Mode";
-            Width = 420;
+            Width = 450;
             Height = 320;
             WindowStartupLocation =
                 WindowStartupLocation.CenterScreen;

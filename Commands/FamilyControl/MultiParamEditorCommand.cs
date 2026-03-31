@@ -15,10 +15,12 @@ namespace HMVTools
             ref string message,
             ElementSet elements)
         {
-            UIDocument uidoc = commandData.Application.ActiveUIDocument;
+            UIDocument uidoc =
+                commandData.Application.ActiveUIDocument;
             Document doc = uidoc.Document;
 
-            ICollection<ElementId> selIds = uidoc.Selection.GetElementIds();
+            ICollection<ElementId> selIds =
+                uidoc.Selection.GetElementIds();
             var instances = new List<FamilyInstance>();
             foreach (ElementId id in selIds)
             {
@@ -35,12 +37,14 @@ namespace HMVTools
             }
 
             // Group instances by family name
-            var familyGroups = new Dictionary<string, List<FamilyInstance>>();
+            var familyGroups =
+                new Dictionary<string, List<FamilyInstance>>();
             foreach (FamilyInstance fi in instances)
             {
                 string famName = fi.Symbol.Family.Name;
                 if (!familyGroups.ContainsKey(famName))
-                    familyGroups[famName] = new List<FamilyInstance>();
+                    familyGroups[famName] =
+                        new List<FamilyInstance>();
                 familyGroups[famName].Add(fi);
             }
 
@@ -49,17 +53,18 @@ namespace HMVTools
                 new Dictionary<string, List<ParamInfo>>();
             foreach (var kvp in familyGroups)
             {
-                var pList = CollectInstanceParams(
-                    kvp.Value, doc);
-                familyParams[kvp.Key] = pList;
+                familyParams[kvp.Key] =
+                    CollectInstanceParams(kvp.Value, doc);
             }
 
             bool commonMode = false;
-            List<string> familyNames = familyGroups.Keys.ToList();
+            List<string> familyNames =
+                familyGroups.Keys.ToList();
 
             if (familyNames.Count > 1)
             {
-                var modeWin = new MultiParamModeWindow(familyNames);
+                var modeWin =
+                    new MultiParamModeWindow(familyNames);
                 if (modeWin.ShowDialog() != true)
                     return Result.Cancelled;
                 commonMode = modeWin.IsCommonMode;
@@ -69,101 +74,56 @@ namespace HMVTools
             if (commonMode)
             {
                 var common = GetCommonParams(familyParams);
-                editorParams = new Dictionary<string, List<ParamInfo>>
-                {
-                    { "Common", common }
-                };
+                editorParams =
+                    new Dictionary<string, List<ParamInfo>>
+                    {
+                        { "Common", common }
+                    };
             }
             else
             {
                 editorParams = familyParams;
             }
 
-            var editorWin = new MultiParamEditorWindow(
-                editorParams, familyGroups, commonMode);
-            if (editorWin.ShowDialog() != true)
-                return Result.Cancelled;
-
-            // Apply changes
-            var changes = editorWin.ResultChanges;
-            if (changes == null || changes.Count == 0)
-                return Result.Cancelled;
-
-            int changed = 0;
-            int errors = 0;
-
-            using (Transaction tx = new Transaction(doc,
-                "HMV – Multi-Parameter Edit"))
-            {
-                tx.Start();
-
-                foreach (var entry in changes)
+            // Refresh callback: re-reads param values from
+            // the live model after each Apply
+            Func<Dictionary<string, List<ParamInfo>>> refreshFn =
+                () =>
                 {
-                    string famKey = entry.Key;
-                    List<FamilyInstance> targets;
-
+                    var fp =
+                        new Dictionary<string, List<ParamInfo>>();
+                    foreach (var kvp in familyGroups)
+                    {
+                        fp[kvp.Key] =
+                            CollectInstanceParams(
+                                kvp.Value, doc);
+                    }
                     if (commonMode)
                     {
-                        targets = instances;
-                    }
-                    else
-                    {
-                        if (!familyGroups.ContainsKey(famKey))
-                            continue;
-                        targets = familyGroups[famKey];
-                    }
-
-                    foreach (var change in entry.Value)
-                    {
-                        foreach (FamilyInstance fi in targets)
+                        var c = GetCommonParams(fp);
+                        return new Dictionary<string,
+                            List<ParamInfo>>
                         {
-                            Parameter p =
-                                fi.LookupParameter(change.ParamName);
-                            if (p == null || p.IsReadOnly)
-                                continue;
-
-                            try
-                            {
-                                if (p.StorageType == StorageType.Double)
-                                {
-                                    double feet = ConvertToInternal(
-                                        change.NewValue, p, doc);
-                                    p.Set(feet);
-                                    changed++;
-                                }
-                                else if (p.StorageType == StorageType.Integer)
-                                {
-                                    if (int.TryParse(change.NewValue,
-                                        out int iv))
-                                    {
-                                        p.Set(iv);
-                                        changed++;
-                                    }
-                                    else errors++;
-                                }
-                                else if (p.StorageType == StorageType.String)
-                                {
-                                    p.Set(change.NewValue);
-                                    changed++;
-                                }
-                            }
-                            catch
-                            {
-                                errors++;
-                            }
-                        }
+                            { "Common", c }
+                        };
                     }
-                }
+                    return fp;
+                };
 
-                tx.Commit();
-            }
+            var editorWin = new MultiParamEditorWindow(
+                editorParams, familyGroups, commonMode,
+                doc, instances, refreshFn);
 
-            TaskDialog.Show("HMV Tools – Multi-Parameter Editor",
-                $"Parameters set: {changed}\n"
-              + $"Errors: {errors}");
+            editorWin.ShowDialog();
 
+            // Changes are applied live inside the window,
+            // so we just return Succeeded when it closes.
             return Result.Succeeded;
         }
+
+        // ═════════════════════════════════════════════════════════
+        // Parameter collection helpers
+        // ═════════════════════════════════════════════════════════
 
         private List<ParamInfo> CollectInstanceParams(
             List<FamilyInstance> instances, Document doc)
@@ -190,7 +150,6 @@ namespace HMVTools
 
                 seen.Add(name);
 
-                // Collect current values from all instances
                 var values = new List<string>();
                 foreach (FamilyInstance fi in instances)
                 {
@@ -201,7 +160,8 @@ namespace HMVTools
                         values.Add("");
                 }
 
-                bool varies = values.Distinct().Count() > 1;
+                bool varies =
+                    values.Distinct().Count() > 1;
                 string displayUnit = GetDisplayUnit(p, doc);
 
                 result.Add(new ParamInfo
@@ -209,7 +169,8 @@ namespace HMVTools
                     Name = name,
                     StorageType = p.StorageType,
                     CurrentValue = varies
-                        ? string.Join(", ", values.Distinct())
+                        ? string.Join(", ",
+                            values.Distinct())
                         : values[0],
                     Varies = varies,
                     DisplayUnit = displayUnit
@@ -251,7 +212,8 @@ namespace HMVTools
             return "";
         }
 
-        private string GetDisplayUnit(Parameter p, Document doc)
+        private string GetDisplayUnit(
+            Parameter p, Document doc)
         {
             if (p.StorageType != StorageType.Double)
                 return "";
@@ -284,26 +246,6 @@ namespace HMVTools
             }
         }
 
-        private double ConvertToInternal(
-            string text, Parameter p, Document doc)
-        {
-            double val = double.Parse(text);
-            try
-            {
-                ForgeTypeId specId =
-                    p.Definition.GetDataType();
-                ForgeTypeId unitId = doc.GetUnits()
-                    .GetFormatOptions(specId)
-                    .GetUnitTypeId();
-                return UnitUtils.ConvertToInternalUnits(
-                    val, unitId);
-            }
-            catch
-            {
-                return val;
-            }
-        }
-
         private List<ParamInfo> GetCommonParams(
             Dictionary<string, List<ParamInfo>> familyParams)
         {
@@ -319,7 +261,8 @@ namespace HMVTools
                 bool inAll = true;
                 for (int i = 1; i < lists.Count; i++)
                 {
-                    if (!lists[i].Any(p => p.Name == pi.Name
+                    if (!lists[i].Any(p =>
+                        p.Name == pi.Name
                         && p.StorageType == pi.StorageType))
                     {
                         inAll = false;
