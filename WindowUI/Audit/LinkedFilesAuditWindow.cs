@@ -226,7 +226,7 @@ namespace HMVTools
                 // Format to exactly 2 decimal places ("F2") to match your standard, 
                 // and use InvariantCulture to ALWAYS use a period (.) for decimals.
                 // Note: If you want 3 decimal places, change "F2" to "F3".
-                return parsedValue.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+                return parsedValue.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
             }
 
             return value; // If parsing fails for some reason, return the string as-is
