@@ -19,7 +19,7 @@ namespace HMVTools
             try
             {
                 // ==========================================
-                // STEP 1: BATCH PICK PEDESTALS
+                // STEP 1: BATCH PICK PEDESTALS (Compound or Single)
                 // ==========================================
                 TaskDialog.Show("HMV Tools", "Step 1: Window-select ALL the PEDESTALS (You can drag a box over them). Click 'Finish' in the top left options bar when done.");
 
@@ -55,9 +55,8 @@ namespace HMVTools
                 if (!eqRefs.Any()) return Result.Failed;
 
                 // ==========================================
-                // STEP 3: GATHER DATA FROM THE FIRST ELEMENTS
+                // STEP 3: GATHER UI DATA (WITH RECURSIVE SEARCH)
                 // ==========================================
-                // We use the first selected elements just to populate the UI dropdowns
                 FamilyInstance firstPedestal = doc.GetElement(pedRefs.First()) as FamilyInstance;
                 FamilyInstance firstEquipment = doc.GetElement(eqRefs.First()) as FamilyInstance;
 
@@ -74,13 +73,10 @@ namespace HMVTools
                 }
                 List<string> signageTypeNames = signageCollector.Select(s => $"{s.FamilyName} : {s.Name}").OrderBy(n => n).ToList();
 
-                var subComponentIds = firstPedestal.GetSubComponentIds();
-                List<FamilyInstance> nestedFamilies = subComponentIds
-                    .Select(id => doc.GetElement(id) as FamilyInstance)
-                    .Where(f => f != null)
-                    .ToList();
-
-                List<string> nestedNames = nestedFamilies.Select(f => f.Name).Distinct().OrderBy(n => n).ToList();
+                // 🌟 RECURSIVE DEEP SEARCH FOR UI DROPDOWN 🌟
+                HashSet<string> nestedNamesSet = new HashSet<string>();
+                GetNestedNamesRecursive(doc, firstPedestal, nestedNamesSet);
+                List<string> nestedNames = nestedNamesSet.OrderBy(n => n).ToList();
 
                 List<string> equipmentParams = firstEquipment.Parameters
                     .Cast<Parameter>()
@@ -129,7 +125,7 @@ namespace HMVTools
                                     }
                                 }
                             }
-                            catch { /* Ignore errors */ }
+                            catch { /* Ignore */ }
                         }
                         t.RollBack();
                     }
@@ -154,7 +150,7 @@ namespace HMVTools
                 if (signageSymbol == null) return Result.Failed;
 
                 // ==========================================
-                // STEP 5: BATCH PROCESSING LOOP
+                // STEP 5: DEEP NESTED BATCH PROCESSING LOOP
                 // ==========================================
                 int successCount = 0;
 
@@ -168,123 +164,138 @@ namespace HMVTools
                         FamilyInstance currentPedestal = doc.GetElement(pedRef) as FamilyInstance;
                         if (currentPedestal == null) continue;
 
-                        // --- 5A: FIND CLOSEST EQUIPMENT ---
-                        XYZ pedCenter = GetElementCenter(currentPedestal);
-                        FamilyInstance closestEquipment = null;
-                        double minDistance = double.MaxValue;
+                        // 🌟 FIND ALL TARGET ANCHORS, NO MATTER HOW DEEPLY NESTED 🌟
+                        List<FamilyInstance> targetAnchors = new List<FamilyInstance>();
+                        GetTargetAnchorsRecursive(doc, currentPedestal, selectedNestedName, targetAnchors);
 
-                        foreach (Reference eqRef in eqRefs)
+                        // If no anchors found (fallback to standard origin placement)
+                        if (targetAnchors.Count == 0)
                         {
-                            FamilyInstance eq = doc.GetElement(eqRef) as FamilyInstance;
-                            if (eq == null) continue;
-
-                            double dist = pedCenter.DistanceTo(GetElementCenter(eq));
-                            if (dist < minDistance)
-                            {
-                                minDistance = dist;
-                                closestEquipment = eq;
-                            }
+                            targetAnchors.Add(currentPedestal); // Treat the main pedestal as the only anchor
                         }
 
-                        if (closestEquipment == null) continue; // Skip if no equipment found
-
-                        // --- 5B: FIND TARGET NESTED ANCHOR IN THIS PEDESTAL ---
-                        FamilyInstance targetNested = currentPedestal.GetSubComponentIds()
-                            .Select(id => doc.GetElement(id) as FamilyInstance)
-                            .FirstOrDefault(f => f != null && f.Name == selectedNestedName);
-
-                        XYZ initialPlacementPoint = currentPedestal.GetTransform().Origin;
-                        double rotationAngle = 0;
-
-                        if (targetNested != null)
+                        // LOOP THROUGH EVERY SINGLE ANCHOR FOUND IN THIS FAMILY
+                        foreach (FamilyInstance anchor in targetAnchors)
                         {
-                            initialPlacementPoint = targetNested.GetTransform().Origin;
-                            rotationAngle = XYZ.BasisX.AngleOnPlaneTo(targetNested.GetTransform().BasisX, XYZ.BasisZ);
-                        }
+                            // --- 5A: FIND CLOSEST EQUIPMENT TO THIS SPECIFIC ANCHOR ---
+                            XYZ anchorCenter = GetElementCenter(anchor);
+                            FamilyInstance closestEquipment = null;
+                            double minDistance = double.MaxValue;
 
-                        // --- 5C: PLACE, ROTATE, & ALIGN ---
-                        try
-                        {
-                            Level pedLevel = doc.GetElement(currentPedestal.LevelId) as Level;
-                            FamilyInstance newSignage;
-
-                            if (pedLevel != null)
-                                newSignage = doc.Create.NewFamilyInstance(initialPlacementPoint, signageSymbol, pedLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
-                            else
-                                newSignage = doc.Create.NewFamilyInstance(initialPlacementPoint, signageSymbol, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
-
-                            if (Math.Abs(rotationAngle) > 0.0001)
+                            foreach (Reference eqRef in eqRefs)
                             {
-                                Transform sigTransform = newSignage.GetTransform();
-                                double currentAngle = XYZ.BasisX.AngleOnPlaneTo(sigTransform.BasisX, XYZ.BasisZ);
-                                double angleDiff = rotationAngle - currentAngle;
+                                FamilyInstance eq = doc.GetElement(eqRef) as FamilyInstance;
+                                if (eq == null) continue;
 
-                                if (Math.Abs(angleDiff) > 0.0001)
+                                double dist = anchorCenter.DistanceTo(GetElementCenter(eq));
+                                if (dist < minDistance)
                                 {
-                                    Line axis = Line.CreateBound(initialPlacementPoint, initialPlacementPoint + XYZ.BasisZ);
-                                    ElementTransformUtils.RotateElement(doc, newSignage.Id, axis, angleDiff);
+                                    minDistance = dist;
+                                    closestEquipment = eq;
                                 }
                             }
 
-                            // MUST Regenerate inside the loop so the bounding box updates before moving
-                            doc.Regenerate();
+                            if (closestEquipment == null) continue;
 
-                            // ALIGN PHYSICAL CENTERS (DYNAMIC THICKNESS CALCULATION)
-                            if (targetNested != null)
+                            // --- 5B: PLACE & ROTATE ---
+                            try
                             {
-                                BoundingBoxXYZ anchorBox = targetNested.get_BoundingBox(null);
-                                XYZ anchorCenter = (anchorBox.Min + anchorBox.Max) / 2.0;
+                                XYZ initialPlacementPoint = anchor.GetTransform().Origin;
+                                double rotationAngle = XYZ.BasisX.AngleOnPlaneTo(anchor.GetTransform().BasisX, XYZ.BasisZ);
 
-                                BoundingBoxXYZ signBox = newSignage.get_BoundingBox(null);
-                                XYZ signCenter = (signBox.Min + signBox.Max) / 2.0;
+                                Level pedLevel = doc.GetElement(currentPedestal.LevelId) as Level;
+                                FamilyInstance newSignage;
 
-                                BoundingBoxXYZ pedBox = currentPedestal.get_BoundingBox(null);
-                                XYZ mainPedCenter = (pedBox.Min + pedBox.Max) / 2.0;
-                                XYZ outwardDir = new XYZ(anchorCenter.X - mainPedCenter.X, anchorCenter.Y - mainPedCenter.Y, 0);
+                                if (pedLevel != null)
+                                    newSignage = doc.Create.NewFamilyInstance(initialPlacementPoint, signageSymbol, pedLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                                else
+                                    newSignage = doc.Create.NewFamilyInstance(initialPlacementPoint, signageSymbol, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
 
-                                if (!outwardDir.IsAlmostEqualTo(XYZ.Zero)) outwardDir = outwardDir.Normalize();
-                                else outwardDir = targetNested.GetTransform().BasisY;
-
-                                XYZ anchorDiag = anchorBox.Max - anchorBox.Min;
-                                XYZ signDiag = signBox.Max - signBox.Min;
-
-                                double anchorThickness = Math.Abs(anchorDiag.DotProduct(outwardDir));
-                                double signThickness = Math.Abs(signDiag.DotProduct(outwardDir));
-
-                                double pushOutwardFeet = (anchorThickness / 2.0) + (signThickness / 2.0) + (2.0 / 304.8);
-
-                                bool reverseDirection = false;
-                                if (reverseDirection) pushOutwardFeet = -pushOutwardFeet;
-
-                                XYZ targetCenter = anchorCenter + (outwardDir * pushOutwardFeet);
-                                XYZ moveVector = targetCenter - signCenter;
-
-                                if (!moveVector.IsAlmostEqualTo(XYZ.Zero))
+                                if (Math.Abs(rotationAngle) > 0.0001)
                                 {
-                                    ElementTransformUtils.MoveElement(doc, newSignage.Id, moveVector);
+                                    Transform sigTransform = newSignage.GetTransform();
+                                    double currentAngle = XYZ.BasisX.AngleOnPlaneTo(sigTransform.BasisX, XYZ.BasisZ);
+                                    double angleDiff = rotationAngle - currentAngle;
+
+                                    if (Math.Abs(angleDiff) > 0.0001)
+                                    {
+                                        Line axis = Line.CreateBound(initialPlacementPoint, initialPlacementPoint + XYZ.BasisZ);
+                                        ElementTransformUtils.RotateElement(doc, newSignage.Id, axis, angleDiff);
+                                    }
                                 }
+
+                                doc.Regenerate(); // Crucial for bounding box update
+
+                                // --- 5C: ALIGN PHYSICAL CENTERS TO FRONT FACE ---
+                                if (anchor.Name == selectedNestedName) // Only align if it's the actual anchor plate
+                                {
+                                    BoundingBoxXYZ anchorBox = anchor.get_BoundingBox(null);
+                                    BoundingBoxXYZ signBox = newSignage.get_BoundingBox(null);
+
+                                    if (anchorBox != null && signBox != null)
+                                    {
+                                        XYZ physicalAnchorCenter = (anchorBox.Min + anchorBox.Max) / 2.0;
+                                        XYZ signCenter = (signBox.Min + signBox.Max) / 2.0;
+
+                                        Transform anchorTx = anchor.GetTransform();
+
+                                        XYZ localX = anchorTx.BasisX.Normalize();
+                                        XYZ localY = anchor.FacingOrientation.Normalize();
+                                        if (localY.IsAlmostEqualTo(XYZ.Zero)) localY = anchorTx.BasisY.Normalize();
+                                        XYZ localZ = localX.CrossProduct(localY).Normalize();
+
+                                        // 1. Find the raw 3D distance
+                                        XYZ centerDiff = physicalAnchorCenter - signCenter;
+
+                                        // 2. Project this distance onto the Plate's local face
+                                        double alignX = centerDiff.DotProduct(localX);
+                                        double alignZ = centerDiff.DotProduct(localZ);
+
+                                        // 🌟 THIS IS WHAT WAS MISSING! Distance to center it on the Y depth 🌟
+                                        double alignY = centerDiff.DotProduct(localY);
+
+                                        // 3. Calculate the thickness depth
+                                        XYZ anchorDiag = anchorBox.Max - anchorBox.Min;
+                                        XYZ signDiag = signBox.Max - signBox.Min;
+
+                                        double anchorThickness = Math.Abs(anchorDiag.DotProduct(localY));
+                                        double signThickness = Math.Abs(signDiag.DotProduct(localY));
+
+                                        double pushOutwardFeet = (anchorThickness / 2.0) + (signThickness / 2.0) + (2.0 / 304.8);
+
+                                        // 4. Combine it all
+                                        // Center it (alignY) THEN push it to the front face (pushOutwardFeet)
+                                        double finalYMove = alignY - pushOutwardFeet;
+
+                                        XYZ moveVector = (localX * alignX) + (localZ * alignZ) + (localY * finalYMove);
+
+                                        if (!moveVector.IsAlmostEqualTo(XYZ.Zero))
+                                        {
+                                            ElementTransformUtils.MoveElement(doc, newSignage.Id, moveVector);
+                                        }
+                                    }
+                                }
+
+                                // --- 5D: SYNC PARAMETERS ---
+                                Parameter srcParam = closestEquipment.LookupParameter(sourceParamName);
+                                Parameter tgtParam = newSignage.LookupParameter(targetParamName);
+
+                                if (srcParam != null && tgtParam != null && !tgtParam.IsReadOnly)
+                                {
+                                    switch (srcParam.StorageType)
+                                    {
+                                        case StorageType.String: tgtParam.Set(srcParam.AsString() ?? ""); break;
+                                        case StorageType.Double: tgtParam.Set(srcParam.AsDouble()); break;
+                                        case StorageType.Integer: tgtParam.Set(srcParam.AsInteger()); break;
+                                    }
+                                }
+
+                                successCount++;
                             }
-
-                            // --- 5D: SYNC PARAMETERS ---
-                            Parameter srcParam = closestEquipment.LookupParameter(sourceParamName);
-                            Parameter tgtParam = newSignage.LookupParameter(targetParamName);
-
-                            if (srcParam != null && tgtParam != null && !tgtParam.IsReadOnly)
+                            catch
                             {
-                                switch (srcParam.StorageType)
-                                {
-                                    case StorageType.String: tgtParam.Set(srcParam.AsString() ?? ""); break;
-                                    case StorageType.Double: tgtParam.Set(srcParam.AsDouble()); break;
-                                    case StorageType.Integer: tgtParam.Set(srcParam.AsInteger()); break;
-                                }
+                                continue;
                             }
-
-                            successCount++;
-                        }
-                        catch (Exception ex)
-                        {
-                            // Skip to the next one if one fails, instead of blowing up the whole batch
-                            continue;
                         }
                     }
 
@@ -301,12 +312,44 @@ namespace HMVTools
             }
         }
 
-        // Helper method to get the physical center of an element
+        // =========================================================================================
+        // HELPER METHODS
+        // =========================================================================================
+
         private XYZ GetElementCenter(Element el)
         {
             BoundingBoxXYZ box = el.get_BoundingBox(null);
             if (box == null) return (el.Location as LocationPoint)?.Point ?? XYZ.Zero;
             return (box.Min + box.Max) / 2.0;
+        }
+
+        // 🌟 RECURSIVE FUNCTION: Digs infinitely deep to find all nested family names 🌟
+        private void GetNestedNamesRecursive(Document doc, FamilyInstance parent, HashSet<string> names)
+        {
+            foreach (ElementId id in parent.GetSubComponentIds())
+            {
+                if (doc.GetElement(id) is FamilyInstance subInst)
+                {
+                    names.Add(subInst.Name);
+                    GetNestedNamesRecursive(doc, subInst, names); // Dig deeper
+                }
+            }
+        }
+
+        // 🌟 RECURSIVE FUNCTION: Digs infinitely deep to retrieve the actual instances 🌟
+        private void GetTargetAnchorsRecursive(Document doc, FamilyInstance parent, string targetName, List<FamilyInstance> foundAnchors)
+        {
+            foreach (ElementId id in parent.GetSubComponentIds())
+            {
+                if (doc.GetElement(id) is FamilyInstance subInst)
+                {
+                    if (subInst.Name == targetName)
+                    {
+                        foundAnchors.Add(subInst);
+                    }
+                    GetTargetAnchorsRecursive(doc, subInst, targetName, foundAnchors); // Dig deeper
+                }
+            }
         }
     }
 

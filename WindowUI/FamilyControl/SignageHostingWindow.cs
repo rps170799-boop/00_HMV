@@ -60,11 +60,30 @@ namespace HMVTools
             // 3. Source Parameter
             root.Children.Add(CreateLabel("Source Param (Electrical Eq.):"));
             _cmbSource = CreateSearchableComboBox(sourceParams);
+            string targetSourceName = "OperationalNamingCode";
+            if (_cmbSource.Items.Contains(targetSourceName))
+            {
+                _cmbSource.SelectedItem = targetSourceName;
+            }
+            else if (_cmbSource.Items.Count > 0)
+            {
+                _cmbSource.SelectedIndex = 0;
+            }
+                
             root.Children.Add(_cmbSource);
 
             // 4. Target Parameter
             root.Children.Add(CreateLabel("Target Param (Signage):"));
             _cmbTarget = CreateSearchableComboBox(targetParams);
+            string targetParamName = "HMV_PLACA_CENTRAL";
+            if (_cmbTarget.Items.Contains(targetParamName))
+            {
+                _cmbTarget.SelectedItem = targetParamName;
+            }
+            else if (_cmbTarget.Items.Count > 0)
+            {
+                _cmbTarget.SelectedIndex = 0;
+            }
             root.Children.Add(_cmbTarget);
 
             // Buttons

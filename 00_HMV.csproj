@@ -216,6 +216,7 @@
   <ItemGroup />
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\signage_32.png" />
     <EmbeddedResource Include="Resources\migrate_32.png" />
     <EmbeddedResource Include="Resources\linkaudit_32.png" />
   </ItemGroup>
