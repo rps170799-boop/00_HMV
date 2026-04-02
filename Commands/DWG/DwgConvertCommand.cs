@@ -140,6 +140,8 @@ namespace HMVTools
             List<ImportInstance> selectedDwgs, string font)
         {
             int textCount = 0;
+            int errorCount = 0;
+            string lastError = "";
             int purgedStyles = 0;
             int purgedTextTypes = 0;
             var typeCache = new Dictionary<string, TextNoteType>();
@@ -159,14 +161,48 @@ namespace HMVTools
                     continue;
                 }
 
-                BoundingBoxXYZ revitBB = dwg.get_BoundingBox(view);
-                if (revitBB == null)
+                // ============================================================
+                // STEP 1: Get the GeometryInstance from Revit
+                // This gives us:
+                //   - gi.Transform: the REAL transform Revit uses (handles
+                //     UTM offset, rotation, unit conversion — everything)
+                //   - gi.GetSymbolGeometry(): curves in the DWG's "symbol
+                //     space" (the coordinate system BEFORE the transform)
+                // ============================================================
+                Options geoOpts = new Options();
+                geoOpts.View = view;
+                geoOpts.ComputeReferences = true;
+                GeometryElement geoElem = dwg.get_Geometry(geoOpts);
+
+                Transform giTransform = null;
+                List<XYZ> symbolPoints = new List<XYZ>();
+
+                foreach (GeometryObject geoObj in geoElem)
+                {
+                    if (geoObj is GeometryInstance gi)
+                    {
+                        giTransform = gi.Transform;
+
+                        // Collect line endpoints from symbol geometry
+                        // These are in the DWG's internal symbol space
+                        CollectSymbolPoints(
+                            gi.GetSymbolGeometry(), symbolPoints);
+                        break; // Use first GeometryInstance found
+                    }
+                }
+
+                if (giTransform == null)
                 {
                     TaskDialog.Show("HMV Tools",
-                        "Cannot get bounding box of DWG in current view.");
+                        "Cannot find GeometryInstance in DWG.\n"
+                        + "The DWG may not contain visible geometry.");
                     continue;
                 }
 
+                // ============================================================
+                // STEP 2: Read the DWG file with ACadSharp
+                // Get text positions AND line endpoints (for calibration)
+                // ============================================================
                 try
                 {
                     CadDocument cadDoc;
@@ -175,13 +211,14 @@ namespace HMVTools
                         cadDoc = reader.Read();
                     }
 
+                    double unitsToMm = GetDwgUnitsToMmFactor(cadDoc);
+
                     // Collect texts
-                    List<double[]> rawCoords = new List<double[]>();
                     List<DwgTextData> rawTexts = new List<DwgTextData>();
 
                     foreach (var entity in cadDoc.Entities)
                     {
-                        CollectRawText(entity, null, rawCoords, rawTexts);
+                        CollectRawText(entity, null, rawTexts);
                     }
 
                     foreach (var entity in cadDoc.Entities)
@@ -191,68 +228,173 @@ namespace HMVTools
                         {
                             foreach (var be in insert.Block.Entities)
                             {
-                                CollectRawText(be, insert, rawCoords, rawTexts);
+                                CollectRawText(be, insert, rawTexts);
                             }
                         }
                     }
 
                     if (rawTexts.Count == 0) continue;
 
-                    // Get ALL entity bounds recursively including blocks
-                    double allMinX = double.MaxValue, allMaxX = double.MinValue;
-                    double allMinY = double.MaxValue, allMaxY = double.MinValue;
-
+                    // Collect line endpoints from ACadSharp (for calibration)
+                    List<double[]> acadPoints = new List<double[]>();
                     foreach (var entity in cadDoc.Entities)
                     {
-                        CollectAllBounds(entity, cadDoc,
-                            ref allMinX, ref allMinY, ref allMaxX, ref allMaxY);
+                        CollectAcadLinePoints(entity, acadPoints);
                     }
 
-                    // Fallback to text bounds if no geometry found
-                    if (allMinX == double.MaxValue)
+                    // ========================================================
+                    // STEP 3: Derive the mapping from ACadSharp → symbol space
+                    //
+                    // Both sources read the same DWG file, so their bounding
+                    // boxes correspond to the same physical geometry. The
+                    // relationship is a linear mapping:
+                    //   symbol_coord = acad_coord * scale + offset
+                    //
+                    // We compute scale and offset by comparing bounding boxes.
+                    // ========================================================
+
+                    // Symbol space bounding box (from Revit)
+                    double sMinX = double.MaxValue, sMinY = double.MaxValue;
+                    double sMaxX = double.MinValue, sMaxY = double.MinValue;
+                    foreach (XYZ sp in symbolPoints)
                     {
-                        foreach (var rc in rawCoords)
-                        {
-                            if (rc[0] < allMinX) allMinX = rc[0];
-                            if (rc[1] < allMinY) allMinY = rc[1];
-                            if (rc[0] > allMaxX) allMaxX = rc[0];
-                            if (rc[1] > allMaxY) allMaxY = rc[1];
-                        }
+                        if (sp.X < sMinX) sMinX = sp.X;
+                        if (sp.Y < sMinY) sMinY = sp.Y;
+                        if (sp.X > sMaxX) sMaxX = sp.X;
+                        if (sp.Y > sMaxY) sMaxY = sp.Y;
                     }
 
-                    double dwgWidth = allMaxX - allMinX;
-                    double dwgHeight = allMaxY - allMinY;
-                    double revitWidth = revitBB.Max.X - revitBB.Min.X;
-                    double revitHeight = revitBB.Max.Y - revitBB.Min.Y;
+                    // ACadSharp bounding box (from file)
+                    double aMinX = double.MaxValue, aMinY = double.MaxValue;
+                    double aMaxX = double.MinValue, aMaxY = double.MinValue;
+                    foreach (double[] ap in acadPoints)
+                    {
+                        if (ap[0] < aMinX) aMinX = ap[0];
+                        if (ap[1] < aMinY) aMinY = ap[1];
+                        if (ap[0] > aMaxX) aMaxX = ap[0];
+                        if (ap[1] > aMaxY) aMaxY = ap[1];
+                    }
 
-                    if (dwgWidth < 0.001 || dwgHeight < 0.001) continue;
+                    double aDW = aMaxX - aMinX;
+                    double aDH = aMaxY - aMinY;
+                    double sDW = sMaxX - sMinX;
+                    double sDH = sMaxY - sMinY;
 
-                    // Proportional mapping: DWG space -> Revit space
+                    if (aDW < 0.001 || aDH < 0.001
+                        || sDW < 0.001 || sDH < 0.001)
+                    {
+                        TaskDialog.Show("HMV Tools",
+                            "Insufficient geometry for calibration.\n"
+                            + "ACad points: " + acadPoints.Count + "\n"
+                            + "Symbol points: " + symbolPoints.Count);
+                        continue;
+                    }
+
+                    // Scale and offset: symbol = acad * scale + offset
+                    double scaleX = sDW / aDW;
+                    double scaleY = sDH / aDH;
+                    double offsetX = sMinX - aMinX * scaleX;
+                    double offsetY = sMinY - aMinY * scaleY;
+
+                    // Use average scale for uniform mapping
+                    // (should be nearly identical for X and Y)
+                    double scale = (scaleX + scaleY) / 2.0;
+
+                    // Rotation angle from the GeometryInstance transform
+                    double importAngle = Math.Atan2(
+                        giTransform.BasisX.Y,
+                        giTransform.BasisX.X);
+
+                    // ===== DEBUG DIALOG =====
+                    string firstText = rawTexts[0].Text;
+                    if (firstText.Length > 30)
+                        firstText = firstText.Substring(0, 30) + "...";
+
+                    // Test mapping of first text
+                    double testSymX = rawTexts[0].RawX * scaleX + offsetX;
+                    double testSymY = rawTexts[0].RawY * scaleY + offsetY;
+                    XYZ testRevit = giTransform.OfPoint(
+                        new XYZ(testSymX, testSymY, 0));
+
+                    string dbg =
+                        "Texts: " + rawTexts.Count + "\n"
+                        + "Symbol pts: " + symbolPoints.Count
+                        + " | ACad pts: " + acadPoints.Count + "\n\n"
+                        + "== BOUNDING BOXES ==\n"
+                        + "Symbol: (" + sMinX.ToString("F2")
+                        + "," + sMinY.ToString("F2") + ") to ("
+                        + sMaxX.ToString("F2") + "," + sMaxY.ToString("F2")
+                        + ") size " + sDW.ToString("F2") + "x"
+                        + sDH.ToString("F2") + "\n"
+                        + "ACad:   (" + aMinX.ToString("F2")
+                        + "," + aMinY.ToString("F2") + ") to ("
+                        + aMaxX.ToString("F2") + "," + aMaxY.ToString("F2")
+                        + ") size " + aDW.ToString("F2") + "x"
+                        + aDH.ToString("F2") + "\n\n"
+                        + "== CALIBRATION ==\n"
+                        + "ScaleX: " + scaleX.ToString("F6")
+                        + " | ScaleY: " + scaleY.ToString("F6") + "\n"
+                        + "OffsetX: " + offsetX.ToString("F4")
+                        + " | OffsetY: " + offsetY.ToString("F4") + "\n\n"
+                        + "== GI TRANSFORM ==\n"
+                        + "Origin: (" + giTransform.Origin.X.ToString("F4")
+                        + ", " + giTransform.Origin.Y.ToString("F4") + ")\n"
+                        + "BasisX len: "
+                        + giTransform.BasisX.GetLength().ToString("F6") + "\n"
+                        + "Rotation: "
+                        + (importAngle * 180.0 / Math.PI).ToString("F2")
+                        + "°\n\n"
+                        + "== FIRST TEXT ==\n"
+                        + "\"" + firstText + "\"\n"
+                        + "Raw: (" + rawTexts[0].RawX.ToString("F2")
+                        + ", " + rawTexts[0].RawY.ToString("F2") + ")\n"
+                        + "Symbol: (" + testSymX.ToString("F4")
+                        + ", " + testSymY.ToString("F4") + ")\n"
+                        + "Revit: (" + testRevit.X.ToString("F4")
+                        + ", " + testRevit.Y.ToString("F4") + ")\n"
+                        + "Height mm: "
+                        + (rawTexts[0].RawHeight * unitsToMm).ToString("F2");
+
+                    TaskDialog.Show("DEBUG - GI Calibration", dbg);
+
+                    // ========================================================
+                    // STEP 4: Map all texts through the derived transform
+                    //   ACadSharp coord → symbol space → gi.Transform → Revit
+                    // ========================================================
                     foreach (var rt in rawTexts)
                     {
-                        double tX = (rt.Position.X - allMinX) / dwgWidth;
-                        double tY = (rt.Position.Y - allMinY) / dwgHeight;
+                        // ACadSharp → symbol space
+                        double symX = rt.RawX * scaleX + offsetX;
+                        double symY = rt.RawY * scaleY + offsetY;
 
-                        double revitX = revitBB.Min.X + tX * revitWidth;
-                        double revitY = revitBB.Min.Y + tY * revitHeight;
+                        // Symbol space → Revit world via gi.Transform
+                        XYZ revitPt = giTransform.OfPoint(
+                            new XYZ(symX, symY, 0));
+                        XYZ finalPos = new XYZ(
+                            revitPt.X, revitPt.Y, 0);
 
-                        XYZ newPos = new XYZ(revitX, revitY, 0);
+                        double heightMm = rt.RawHeight * unitsToMm;
+
+                        // Text rotation = own rotation + import rotation
+                        double totalRot = rt.RawRotation + importAngle;
 
                         allTexts.Add(new DwgTextData(
-                            rt.Text, newPos, rt.HeightMm, 0));
+                            rt.Text, finalPos, heightMm, totalRot));
                     }
                 }
                 catch (Exception ex)
                 {
                     TaskDialog.Show("HMV Tools",
-                        "Error reading DWG: " + ex.Message);
+                        "Error reading DWG:\n" + ex.Message
+                        + "\n\n" + ex.StackTrace);
                     continue;
                 }
             }
 
             if (allTexts.Count == 0)
             {
-                TaskDialog.Show("HMV Tools", "No texts found in selected DWG(s).");
+                TaskDialog.Show("HMV Tools",
+                    "No texts found in selected DWG(s).");
                 return Result.Cancelled;
             }
 
@@ -261,6 +403,7 @@ namespace HMVTools
             {
                 t.Start();
 
+                // Load existing HMV text types
                 foreach (TextNoteType tnt in new FilteredElementCollector(doc)
                     .OfClass(typeof(TextNoteType))
                     .Cast<TextNoteType>())
@@ -301,11 +444,31 @@ namespace HMVTools
                         if (hmvType != null)
                         {
                             TextNote note = TextNote.Create(
-                                doc, view.Id, td.Position, td.Text, hmvType.Id);
+                                doc, view.Id, td.Position,
+                                td.Text, hmvType.Id);
+
+                            if (Math.Abs(td.Rotation) > 0.001)
+                            {
+                                Autodesk.Revit.DB.Line rotAxis =
+                                    Autodesk.Revit.DB.Line.CreateUnbound(
+                                        td.Position, XYZ.BasisZ);
+                                ElementTransformUtils.RotateElement(
+                                    doc, note.Id, rotAxis, td.Rotation);
+                            }
+
                             textCount++;
                         }
+                        else
+                        {
+                            errorCount++;
+                            lastError = "Type creation failed: " + typeName;
+                        }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        errorCount++;
+                        lastError = ex.Message;
+                    }
                 }
 
                 // ===== PURGE UNUSED LINE STYLES =====
@@ -355,10 +518,11 @@ namespace HMVTools
                         .Cast<TextNote>()
                         .Select(tn => tn.GetTypeId()));
 
-                List<TextNoteType> allTextTypes = new FilteredElementCollector(doc)
-                    .OfClass(typeof(TextNoteType))
-                    .Cast<TextNoteType>()
-                    .ToList();
+                List<TextNoteType> allTextTypes =
+                    new FilteredElementCollector(doc)
+                        .OfClass(typeof(TextNoteType))
+                        .Cast<TextNoteType>()
+                        .ToList();
 
                 foreach (TextNoteType tnt in allTextTypes)
                 {
@@ -372,31 +536,91 @@ namespace HMVTools
                 t.Commit();
             }
 
-            TaskDialog.Show("HMV Tools",
-                "Texts created: " + textCount + "\n"
+            string resultMsg = "Texts created: " + textCount + "\n"
                 + "Font: " + font + "\n"
-                + "Text types: " + typeCache.Count + " HMV types\n\n"
-                + "Cleanup:\n"
+                + "Text types: " + typeCache.Count + " HMV types\n";
+
+            if (errorCount > 0)
+            {
+                resultMsg += "\nERRORS: " + errorCount + " texts failed\n"
+                    + "Last error: " + lastError + "\n";
+            }
+
+            resultMsg += "\nCleanup:\n"
                 + "Unused line styles purged: " + purgedStyles + "\n"
-                + "Unused text types purged: " + purgedTextTypes);
+                + "Unused text types purged: " + purgedTextTypes;
+
+            TaskDialog.Show("HMV Tools", resultMsg);
             return Result.Succeeded;
         }
+
+
+
+        private void CollectSymbolPoints(GeometryElement geoElem,
+    List<XYZ> points)
+        {
+            foreach (GeometryObject geoObj in geoElem)
+            {
+                if (geoObj is Curve curve)
+                {
+                    points.Add(curve.GetEndPoint(0));
+                    points.Add(curve.GetEndPoint(1));
+                }
+                else if (geoObj is PolyLine poly)
+                {
+                    foreach (XYZ pt in poly.GetCoordinates())
+                        points.Add(pt);
+                }
+                else if (geoObj is GeometryInstance nestedGi)
+                {
+                    // GetInstanceGeometry() returns nested block
+                    // geometry already in the parent's symbol space
+                    CollectSymbolPoints(
+                        nestedGi.GetInstanceGeometry(), points);
+                }
+                else if (geoObj is GeometryElement nestedElem)
+                {
+                    CollectSymbolPoints(nestedElem, points);
+                }
+            }
+        }
+
+
 
         // ===== ACadSharp TEXT EXTRACTION =====
 
         private void CollectRawText(ACadSharp.Entities.Entity entity,
             ACadSharp.Entities.Insert parentInsert,
-            List<double[]> rawCoords, List<DwgTextData> rawTexts)
+            List<DwgTextData> rawTexts)
         {
             string text = null;
-            double x = 0, y = 0, height = 0;
+            double x = 0, y = 0, height = 0, rotation = 0;
 
             if (entity is AcadText textEnt)
             {
                 text = textEnt.Value;
-                x = textEnt.InsertPoint.X;
-                y = textEnt.InsertPoint.Y;
+
+                if (textEnt.HorizontalAlignment !=
+                        ACadSharp.Entities.TextHorizontalAlignment.Left ||
+                    textEnt.VerticalAlignment !=
+                        ACadSharp.Entities.TextVerticalAlignmentType.Baseline)
+                {
+                    x = textEnt.AlignmentPoint.X;
+                    y = textEnt.AlignmentPoint.Y;
+
+                    if (Math.Abs(x) < 0.0001 && Math.Abs(y) < 0.0001)
+                    {
+                        x = textEnt.InsertPoint.X;
+                        y = textEnt.InsertPoint.Y;
+                    }
+                }
+                else
+                {
+                    x = textEnt.InsertPoint.X;
+                    y = textEnt.InsertPoint.Y;
+                }
                 height = textEnt.Height;
+                rotation = textEnt.Rotation * Math.PI / 180.0;
             }
             else if (entity is AcadMText mtext)
             {
@@ -405,83 +629,76 @@ namespace HMVTools
                 x = mtext.InsertPoint.X;
                 y = mtext.InsertPoint.Y;
                 height = mtext.Height;
+                rotation = mtext.Rotation;
             }
 
-            if (string.IsNullOrWhiteSpace(text))
-                return;
+            if (string.IsNullOrWhiteSpace(text)) return;
 
             if (parentInsert != null)
             {
                 double ix = parentInsert.InsertPoint.X;
                 double iy = parentInsert.InsertPoint.Y;
-                double scale = parentInsert.XScale;
+                double sx = parentInsert.XScale;
+                double sy = parentInsert.YScale;
                 double insRot = parentInsert.Rotation * Math.PI / 180.0;
 
-                double rx = x * scale * Math.Cos(insRot)
-                          - y * scale * Math.Sin(insRot) + ix;
-                double ry = x * scale * Math.Sin(insRot)
-                          + y * scale * Math.Cos(insRot) + iy;
+                double rx = x * sx * Math.Cos(insRot)
+                          - y * sy * Math.Sin(insRot) + ix;
+                double ry = x * sx * Math.Sin(insRot)
+                          + y * sy * Math.Cos(insRot) + iy;
 
                 x = rx;
                 y = ry;
-                height *= scale;
+                height *= Math.Abs(sx);
+                rotation += insRot;
             }
 
-            rawCoords.Add(new double[] { x, y });
-            double heightMm = height * 1000.0;
-            rawTexts.Add(new DwgTextData(text,
-                new XYZ(x, y, 0), heightMm, 0));
+            var td = new DwgTextData(text, XYZ.Zero, 0, 0);
+            td.RawX = x;
+            td.RawY = y;
+            td.RawHeight = height;
+            td.RawRotation = rotation;
+            rawTexts.Add(td);
         }
 
-        // ===== DWG BOUNDS (RECURSIVE) =====
+        // ===== ACadSharp LINE POINT EXTRACTION (for calibration) =====
 
-        private void CollectAllBounds(ACadSharp.Entities.Entity entity,
-            CadDocument cadDoc,
-            ref double minX, ref double minY,
-            ref double maxX, ref double maxY)
+        private void CollectAcadLinePoints(
+            ACadSharp.Entities.Entity entity,
+            List<double[]> points)
         {
             if (entity is ACadSharp.Entities.Line ln)
             {
-                UpdateBounds(ln.StartPoint.X, ln.StartPoint.Y,
-                    ref minX, ref minY, ref maxX, ref maxY);
-                UpdateBounds(ln.EndPoint.X, ln.EndPoint.Y,
-                    ref minX, ref minY, ref maxX, ref maxY);
+                points.Add(new double[] { ln.StartPoint.X, ln.StartPoint.Y });
+                points.Add(new double[] { ln.EndPoint.X, ln.EndPoint.Y });
             }
             else if (entity is ACadSharp.Entities.LwPolyline lw)
             {
                 foreach (var v in lw.Vertices)
-                    UpdateBounds(v.Location.X, v.Location.Y,
-                        ref minX, ref minY, ref maxX, ref maxY);
+                    points.Add(new double[] { v.Location.X, v.Location.Y });
             }
             else if (entity is ACadSharp.Entities.Polyline2D p2)
             {
                 foreach (var v in p2.Vertices)
-                    UpdateBounds(v.Location.X, v.Location.Y,
-                        ref minX, ref minY, ref maxX, ref maxY);
+                    points.Add(new double[] { v.Location.X, v.Location.Y });
             }
             else if (entity is ACadSharp.Entities.Circle circ)
             {
-                UpdateBounds(circ.Center.X - circ.Radius, circ.Center.Y - circ.Radius,
-                    ref minX, ref minY, ref maxX, ref maxY);
-                UpdateBounds(circ.Center.X + circ.Radius, circ.Center.Y + circ.Radius,
-                    ref minX, ref minY, ref maxX, ref maxY);
+                points.Add(new double[] {
+                    circ.Center.X - circ.Radius,
+                    circ.Center.Y - circ.Radius });
+                points.Add(new double[] {
+                    circ.Center.X + circ.Radius,
+                    circ.Center.Y + circ.Radius });
             }
             else if (entity is ACadSharp.Entities.Arc arc)
             {
-                UpdateBounds(arc.Center.X - arc.Radius, arc.Center.Y - arc.Radius,
-                    ref minX, ref minY, ref maxX, ref maxY);
-                UpdateBounds(arc.Center.X + arc.Radius, arc.Center.Y + arc.Radius,
-                    ref minX, ref minY, ref maxX, ref maxY);
-            }
-            else if (entity is AcadText txt)
-            {
-                UpdateBounds(txt.InsertPoint.X, txt.InsertPoint.Y,
-                    ref minX, ref minY, ref maxX, ref maxY);
-            }
-            else if (entity is AcadMText mtxt)
-            {
-                UpdateBounds(mtxt.InsertPoint.X, mtxt.InsertPoint.Y,
-                    ref minX, ref minY, ref maxX, ref maxY);
+                points.Add(new double[] {
+                    arc.Center.X - arc.Radius,
+                    arc.Center.Y - arc.Radius });
+                points.Add(new double[] {
+                    arc.Center.X + arc.Radius,
+                    arc.Center.Y + arc.Radius });
             }
             else if (entity is ACadSharp.Entities.Insert ins)
             {
@@ -489,35 +706,48 @@ namespace HMVTools
                 {
                     double ix = ins.InsertPoint.X;
                     double iy = ins.InsertPoint.Y;
-                    double scale = ins.XScale;
+                    double sx = ins.XScale;
+                    double sy = ins.YScale;
+                    double insRot = ins.Rotation * Math.PI / 180.0;
 
                     foreach (var be in ins.Block.Entities)
                     {
-                        double beMinX = double.MaxValue, beMaxX = double.MinValue;
-                        double beMinY = double.MaxValue, beMaxY = double.MinValue;
-                        CollectAllBounds(be, cadDoc,
-                            ref beMinX, ref beMinY, ref beMaxX, ref beMaxY);
-
-                        if (beMinX != double.MaxValue)
+                        var subPts = new List<double[]>();
+                        CollectAcadLinePoints(be, subPts);
+                        foreach (var sp in subPts)
                         {
-                            UpdateBounds(beMinX * scale + ix, beMinY * scale + iy,
-                                ref minX, ref minY, ref maxX, ref maxY);
-                            UpdateBounds(beMaxX * scale + ix, beMaxY * scale + iy,
-                                ref minX, ref minY, ref maxX, ref maxY);
+                            double rx = sp[0] * sx * Math.Cos(insRot)
+                                      - sp[1] * sy * Math.Sin(insRot) + ix;
+                            double ry = sp[0] * sx * Math.Sin(insRot)
+                                      + sp[1] * sy * Math.Cos(insRot) + iy;
+                            points.Add(new double[] { rx, ry });
                         }
                     }
                 }
             }
         }
 
-        private void UpdateBounds(double x, double y,
-            ref double minX, ref double minY,
-            ref double maxX, ref double maxY)
+        // ===== UNIT HELPERS =====
+
+        private double GetDwgUnitsToMmFactor(CadDocument cadDoc)
         {
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
+            try
+            {
+                int u = (int)cadDoc.Header.InsUnits;
+                switch (u)
+                {
+                    case 1: return 25.4;       // Inches
+                    case 2: return 304.8;       // Feet
+                    case 3: return 1609344.0;   // Miles
+                    case 4: return 1.0;         // Millimeters
+                    case 5: return 10.0;        // Centimeters
+                    case 6: return 1000.0;      // Meters
+                    case 10: return 914.4;       // Yards
+                    case 14: return 100.0;       // Decimeters
+                    default: return 1.0;          // Assume mm
+                }
+            }
+            catch { return 1.0; }
         }
 
         // ===== HELPERS =====
@@ -615,6 +845,11 @@ namespace HMVTools
             public XYZ Position;
             public double HeightMm;
             public double Rotation;
+
+            public double RawX;
+            public double RawY;
+            public double RawHeight;
+            public double RawRotation;
 
             public DwgTextData(string text, XYZ pos, double hMm, double rot)
             {

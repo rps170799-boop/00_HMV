@@ -21,7 +21,7 @@ namespace HMVTools
                 // ==========================================
                 // STEP 1: BATCH PICK PEDESTALS (Compound or Single)
                 // ==========================================
-                TaskDialog.Show("HMV Tools", "Step 1: Window-select ALL the PEDESTALS (You can drag a box over them). Click 'Finish' in the top left options bar when done.");
+                TaskDialog.Show("HMV Tools", "Step 1: Window-select ALL the METAL STRUCTURES (You can drag a box over them). Click 'Finish' in the top left options bar when done.");
 
                 IList<Reference> pedRefs;
                 try

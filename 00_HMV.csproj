@@ -146,7 +146,6 @@
     <Compile Include="WindowUI\DWG\Dwg3dtoshapewindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
     <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
-    <Compile Include="Commands\DWG\DWGToLinesCommand.cs" />
     <Compile Include="Commands\Annotation\Gridlevelextentcommand.cs" />
     <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.cs" />
     <Compile Include="WindowUI\Annotation\Pipeannotationwindow.cs" />
