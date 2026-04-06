@@ -154,7 +154,7 @@ namespace HMVTools
                     t.Commit();
                     return copied;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     t.RollBack();
                     return new List<ElementId>();
