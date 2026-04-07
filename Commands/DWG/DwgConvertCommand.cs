@@ -159,73 +159,99 @@ namespace HMVTools
                     foreach (var entity in cadDoc.Entities)
                         CollectRawText(entity, null, rawTexts);
 
-                    foreach (var entity in cadDoc.Entities)
-                    {
-                        if (entity is ACadSharp.Entities.Insert insert && insert.Block != null)
-                        {
-                            foreach (var be in insert.Block.Entities)
-                                CollectRawText(be, insert, rawTexts);
-                        }
-                    }
-
                     if (rawTexts.Count == 0) continue;
 
-                    // --- RIGID MATH (RESTORED FROM REFERENCE + FIX FOR ROTATION) ---
+                    // ===== CALIBRATION USING LONGEST LINE =====
 
-                    // 1. Get Revit Center & Exact Rotation
-                    double revitCenterX = (revitBB.Min.X + revitBB.Max.X) / 2.0;
-                    double revitCenterY = (revitBB.Min.Y + revitBB.Max.Y) / 2.0;
+                    // 1. Find longest line in Revit geometry
+                    Options curveOpts = new Options();
+                    curveOpts.View = view;
+                    GeometryElement curveGeo = dwg.get_Geometry(curveOpts);
 
-                    Transform dwgTransform = dwg.GetTransform();
-                    double revitRot = Math.Atan2(dwgTransform.BasisX.Y, dwgTransform.BasisX.X);
+                    XYZ revLineMid = null;
+                    double revLineAngle = 0;
+                    double revLineLen = 0;
+                    FindLongestRevitLine(curveGeo,
+                        ref revLineMid, ref revLineAngle, ref revLineLen);
 
-                    // 2. Convert CAD units to Feet and find CAD Average Center 
-                    // (This prevents independent X/Y stretching and preserves perfect relative distances)
-                    double sumX = 0, sumY = 0;
-                    foreach (var rt in rawTexts)
+                    if (revLineMid == null)
                     {
-                        // Match Reference Script rigid scaling (DWG Meters to Revit Feet)
-                        double feetX = rt.LocalPosition.X / 0.3048;
-                        double feetY = rt.LocalPosition.Y / 0.3048;
-                        rt.LocalPosition = new XYZ(feetX, feetY, 0);
-
-                        sumX += feetX;
-                        sumY += feetY;
+                        TaskDialog.Show("HMV Tools",
+                            "Could not find any line in Revit geometry.");
+                        continue;
                     }
-                    double cadCenterX = sumX / rawTexts.Count;
-                    double cadCenterY = sumY / rawTexts.Count;
 
-                    // 3. Map points: Translate to origin -> Rotate globally -> Translate to Revit Center
+                    // 2. Find longest line in ACadSharp (raw meters)
+                    double cadMidX = 0, cadMidY = 0;
+                    double cadLineAngle = 0;
+                    double cadLineLen = 0;
+                    foreach (var entity in cadDoc.Entities)
+                    {
+                        FindLongestCadLine(entity, null,
+                            ref cadMidX, ref cadMidY,
+                            ref cadLineAngle, ref cadLineLen);
+                    }
+
+                    if (cadLineLen < 0.001)
+                    {
+                        TaskDialog.Show("HMV Tools",
+                            "Could not find any line in CAD file.");
+                        continue;
+                    }
+
+                    // 3. Compute calibration: rotation + translation
+                    // Convert CAD midpoint from meters to feet
+                    double cadMidXft = cadMidX / 0.3048;
+                    double cadMidYft = cadMidY / 0.3048;
+
+                    // Rotation = Revit line angle - CAD line angle
+                    double rotDelta = revLineAngle - cadLineAngle;
+
+                    double cosR = Math.Cos(rotDelta);
+                    double sinR = Math.Sin(rotDelta);
+
+                    // 4. Map every text using the calibration
                     foreach (var rt in rawTexts)
                     {
-                        // Rigid distance from CAD average center
-                        double dx = rt.LocalPosition.X - cadCenterX;
-                        double dy = rt.LocalPosition.Y - cadCenterY;
+                        // Convert text position to feet
+                        double txFt = rt.LocalPosition.X / 0.3048;
+                        double tyFt = rt.LocalPosition.Y / 0.3048;
 
-                        // Rotate the entire block mathematically
-                        double rotX = dx * Math.Cos(revitRot) - dy * Math.Sin(revitRot);
-                        double rotY = dx * Math.Sin(revitRot) + dy * Math.Cos(revitRot);
+                        // Relative to CAD reference midpoint
+                        double dx = txFt - cadMidXft;
+                        double dy = tyFt - cadMidYft;
 
-                        // Position it at the Revit bounding box center
-                        XYZ finalPos = new XYZ(revitCenterX + rotX, revitCenterY + rotY, 0);
+                        // Apply rotation
+                        double rotX = dx * cosR - dy * sinR;
+                        double rotY = dx * sinR + dy * cosR;
 
-                        // The individual text rotation is its CAD rotation + the Revit global rotation
-                        double finalRotation = rt.Rotation + revitRot;
+                        // Place relative to Revit reference midpoint
+                        XYZ finalPos = new XYZ(
+                            revLineMid.X + rotX,
+                            revLineMid.Y + rotY,
+                            0);
 
-                        // Height parameter matching reference script (Meters to MM)
+                        double finalRotation = rt.Rotation + rotDelta;
                         double heightMm = rt.Height * 1000.0;
 
-                        allTexts.Add(new DwgTextData(rt.Text, finalPos, heightMm, finalRotation, rt.HAlign, rt.VAlignParam));
+                        allTexts.Add(new DwgTextData(
+                            rt.Text, finalPos, heightMm, finalRotation,
+                            rt.HAlign, rt.VAlignParam));
                     }
                 }
                 catch (Exception ex)
                 {
-                    TaskDialog.Show("HMV Tools", "Error reading DWG file structures: " + ex.Message);
+                    TaskDialog.Show("HMV Tools",
+                        "Error reading DWG: " + ex.Message);
                     continue;
                 }
             }
 
-            if (allTexts.Count == 0) return Result.Cancelled;
+            if (allTexts.Count == 0)
+            {
+                TaskDialog.Show("HMV Tools", "No texts found in selected DWG(s).");
+                return Result.Cancelled;
+            }
 
             using (Transaction t = new Transaction(doc, "DWG Texts to Standardized Notes"))
             {
@@ -320,6 +346,112 @@ namespace HMVTools
             return Result.Succeeded;
         }
 
+
+
+        // Find the longest Line in Revit geometry recursively
+        private void FindLongestRevitLine(GeometryElement geoElem,
+            ref XYZ midpoint, ref double angle, ref double maxLen)
+        {
+            foreach (GeometryObject geoObj in geoElem)
+            {
+                if (geoObj is Autodesk.Revit.DB.Line line)
+                {
+                    try
+                    {
+                        double len = line.Length;
+                        if (len > maxLen)
+                        {
+                            maxLen = len;
+                            XYZ p1 = line.GetEndPoint(0);
+                            XYZ p2 = line.GetEndPoint(1);
+                            midpoint = (p1 + p2) / 2.0;
+                            angle = Math.Atan2(p2.Y - p1.Y, p2.X - p1.X);
+                        }
+                    }
+                    catch { }
+                }
+                else if (geoObj is PolyLine pl)
+                {
+                    IList<XYZ> pts = pl.GetCoordinates();
+                    for (int i = 0; i < pts.Count - 1; i++)
+                    {
+                        XYZ p1 = pts[i];
+                        XYZ p2 = pts[i + 1];
+                        double len = p1.DistanceTo(p2);
+                        if (len > maxLen)
+                        {
+                            maxLen = len;
+                            midpoint = (p1 + p2) / 2.0;
+                            angle = Math.Atan2(p2.Y - p1.Y, p2.X - p1.X);
+                        }
+                    }
+                }
+                else if (geoObj is GeometryInstance gi)
+                {
+                    FindLongestRevitLine(gi.GetInstanceGeometry(),
+                        ref midpoint, ref angle, ref maxLen);
+                }
+                else if (geoObj is GeometryElement nested)
+                {
+                    FindLongestRevitLine(nested,
+                        ref midpoint, ref angle, ref maxLen);
+                }
+            }
+        }
+
+        // Find the longest Line in ACadSharp recursively (with block transforms)
+        private void FindLongestCadLine(ACadSharp.Entities.Entity entity,
+            ACadSharp.Entities.Insert parentInsert,
+            ref double midX, ref double midY,
+            ref double angle, ref double maxLen)
+        {
+            if (entity is ACadSharp.Entities.Line ln)
+            {
+                double x1 = ln.StartPoint.X;
+                double y1 = ln.StartPoint.Y;
+                double x2 = ln.EndPoint.X;
+                double y2 = ln.EndPoint.Y;
+
+                // Apply parent insert transform if inside a block
+                if (parentInsert != null)
+                {
+                    double ix = parentInsert.InsertPoint.X;
+                    double iy = parentInsert.InsertPoint.Y;
+                    double sc = parentInsert.XScale;
+                    double ir = parentInsert.Rotation;
+
+                    double nx1 = x1 * sc * Math.Cos(ir) - y1 * sc * Math.Sin(ir) + ix;
+                    double ny1 = x1 * sc * Math.Sin(ir) + y1 * sc * Math.Cos(ir) + iy;
+                    double nx2 = x2 * sc * Math.Cos(ir) - y2 * sc * Math.Sin(ir) + ix;
+                    double ny2 = x2 * sc * Math.Sin(ir) + y2 * sc * Math.Cos(ir) + iy;
+                    x1 = nx1; y1 = ny1; x2 = nx2; y2 = ny2;
+                }
+
+                double dx = x2 - x1;
+                double dy = y2 - y1;
+                double len = Math.Sqrt(dx * dx + dy * dy);
+
+                if (len > maxLen)
+                {
+                    maxLen = len;
+                    midX = (x1 + x2) / 2.0;
+                    midY = (y1 + y2) / 2.0;
+                    angle = Math.Atan2(dy, dx);
+                }
+            }
+            else if (entity is ACadSharp.Entities.Insert ins && ins.Block != null)
+            {
+                foreach (var be in ins.Block.Entities)
+                {
+                    FindLongestCadLine(be, ins,
+                        ref midX, ref midY, ref angle, ref maxLen);
+                }
+            }
+        }
+
+        
+
+
         // ===== DWG FILE FINDER =====
         private string GetDwgFilePath(Document doc, ImportInstance import)
         {
@@ -370,8 +502,91 @@ namespace HMVTools
         }
 
         // ===== ACadSharp TEXT EXTRACTION =====
-        private void CollectRawText(ACadSharp.Entities.Entity entity, ACadSharp.Entities.Insert parentInsert, List<DwgTextData> rawTexts)
+        private void CollectRawText(ACadSharp.Entities.Entity entity,
+             ACadSharp.Entities.Insert parentInsert,
+             List<DwgTextData> rawTexts)
         {
+            // If this entity is itself an Insert, recurse into its block
+            if (entity is ACadSharp.Entities.Insert nestedInsert
+                && nestedInsert.Block != null)
+            {
+                // Combine parent transform with this insert's transform
+                ACadSharp.Entities.Insert effectiveInsert = nestedInsert;
+                if (parentInsert != null)
+                {
+                    // Compute combined position by applying parent transform
+                    // to nested insert's position
+                    double px = parentInsert.InsertPoint.X;
+                    double py = parentInsert.InsertPoint.Y;
+                    double psc = parentInsert.XScale;
+                    double pr = parentInsert.Rotation;
+
+                    double nx = nestedInsert.InsertPoint.X;
+                    double ny = nestedInsert.InsertPoint.Y;
+
+                    double newX = nx * psc * Math.Cos(pr)
+                                - ny * psc * Math.Sin(pr) + px;
+                    double newY = nx * psc * Math.Sin(pr)
+                                + ny * psc * Math.Cos(pr) + py;
+
+                    // Create a synthetic insert with combined transform
+                    // (we use a simple wrapper approach below)
+                    foreach (var be in nestedInsert.Block.Entities)
+                    {
+                        CollectRawTextWithTransform(be,
+                            newX, newY,
+                            psc * nestedInsert.XScale,
+                            pr + nestedInsert.Rotation,
+                            rawTexts);
+                    }
+                }
+                else
+                {
+                    foreach (var be in nestedInsert.Block.Entities)
+                    {
+                        CollectRawText(be, nestedInsert, rawTexts);
+                    }
+                }
+                return;
+            }
+
+            // Otherwise, extract text from this entity
+            CollectRawTextWithTransform(entity,
+                parentInsert?.InsertPoint.X ?? 0,
+                parentInsert?.InsertPoint.Y ?? 0,
+                parentInsert?.XScale ?? 1.0,
+                parentInsert?.Rotation ?? 0,
+                rawTexts);
+        }
+
+        private void CollectRawTextWithTransform(
+            ACadSharp.Entities.Entity entity,
+            double tx, double ty, double tscale, double trot,
+            List<DwgTextData> rawTexts)
+        {
+            // If nested insert, recurse with combined transform
+            if (entity is ACadSharp.Entities.Insert nested
+                && nested.Block != null)
+            {
+                double nx = nested.InsertPoint.X;
+                double ny = nested.InsertPoint.Y;
+
+                double newX = nx * tscale * Math.Cos(trot)
+                            - ny * tscale * Math.Sin(trot) + tx;
+                double newY = nx * tscale * Math.Sin(trot)
+                            + ny * tscale * Math.Cos(trot) + ty;
+
+                foreach (var be in nested.Block.Entities)
+                {
+                    CollectRawTextWithTransform(be,
+                        newX, newY,
+                        tscale * nested.XScale,
+                        trot + nested.Rotation,
+                        rawTexts);
+                }
+                return;
+            }
+
             string text = null;
             double x = 0, y = 0, height = 0, rotation = 0;
             HorizontalTextAlignment hAlign = HorizontalTextAlignment.Left;
@@ -395,8 +610,11 @@ namespace HMVTools
                     y = textEnt.InsertPoint.Y;
                 }
 
-                if (textEnt.HorizontalAlignment == ACadSharp.Entities.TextHorizontalAlignment.Center || textEnt.HorizontalAlignment == ACadSharp.Entities.TextHorizontalAlignment.Middle) hAlign = HorizontalTextAlignment.Center;
-                else if (textEnt.HorizontalAlignment == ACadSharp.Entities.TextHorizontalAlignment.Right) hAlign = HorizontalTextAlignment.Right;
+                if (textEnt.HorizontalAlignment == ACadSharp.Entities.TextHorizontalAlignment.Center
+                    || textEnt.HorizontalAlignment == ACadSharp.Entities.TextHorizontalAlignment.Middle)
+                    hAlign = HorizontalTextAlignment.Center;
+                else if (textEnt.HorizontalAlignment == ACadSharp.Entities.TextHorizontalAlignment.Right)
+                    hAlign = HorizontalTextAlignment.Right;
 
                 if (textEnt.VerticalAlignment == ACadSharp.Entities.TextVerticalAlignmentType.Top) vAlign = 1;
                 else if (textEnt.VerticalAlignment == ACadSharp.Entities.TextVerticalAlignmentType.Middle) vAlign = 2;
@@ -419,23 +637,17 @@ namespace HMVTools
 
             if (string.IsNullOrWhiteSpace(text)) return;
 
-            if (parentInsert != null)
-            {
-                double ix = parentInsert.InsertPoint.X;
-                double iy = parentInsert.InsertPoint.Y;
-                double scale = parentInsert.XScale;
-                double insRot = parentInsert.Rotation;
+            // Apply accumulated transform
+            double rx = x * tscale * Math.Cos(trot)
+                      - y * tscale * Math.Sin(trot) + tx;
+            double ry = x * tscale * Math.Sin(trot)
+                      + y * tscale * Math.Cos(trot) + ty;
 
-                double rx = x * scale * Math.Cos(insRot) - y * scale * Math.Sin(insRot) + ix;
-                double ry = x * scale * Math.Sin(insRot) + y * scale * Math.Cos(insRot) + iy;
+            height *= tscale;
+            rotation += trot;
 
-                x = rx;
-                y = ry;
-                height *= scale;
-                rotation += insRot;
-            }
-
-            rawTexts.Add(new DwgTextData(text, new XYZ(x, y, 0), height, rotation, hAlign, vAlign));
+            rawTexts.Add(new DwgTextData(text,
+                new XYZ(rx, ry, 0), height, rotation, hAlign, vAlign));
         }
 
         private string StripMTextFormatting(string mtext)
@@ -468,6 +680,9 @@ namespace HMVTools
                 VAlignParam = vAlign;
             }
         }
+
+
+        
 
         // ========== LINE HELPERS ==========
         private void GetCurves(Document doc, GeometryElement geoElem, List<(Curve curve, GraphicsStyle style)> curveData)

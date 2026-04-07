@@ -115,6 +115,7 @@
     <Compile Include="App.cs" />
     <Compile Include="Commands\Annotation\AlignSpotElevationsCommand.cs" />
     <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
+    <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
     <Compile Include="Commands\Audit\Auditfamiliescommand.cs" />
@@ -130,6 +131,7 @@
     <Compile Include="Helpers\Migrationdataclasses.cs" />
     <Compile Include="Helpers\Transfermanager.cs" />
     <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
+    <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.cs" />
     <Compile Include="WindowUI\Transfer\Migrateelementswindow.cs" />
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
     <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
@@ -215,6 +217,7 @@
   <ItemGroup />
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\constraints_32.png" />
     <EmbeddedResource Include="Resources\signage_32.png" />
     <EmbeddedResource Include="Resources\migrate_32.png" />
     <EmbeddedResource Include="Resources\linkaudit_32.png" />

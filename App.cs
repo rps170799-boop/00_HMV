@@ -1,12 +1,13 @@
-﻿using System;
+﻿using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Events;
+using Autodesk.Revit.UI;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Configuration.Assemblies;
 using System.IO;
 using System.Reflection;
 using System.Windows.Media.Imaging;
-using Autodesk.Revit.DB;
-using Autodesk.Revit.DB.Events;
-using Autodesk.Revit.UI;
 
 namespace HMVTools
 {
@@ -209,7 +210,21 @@ namespace HMVTools
             BitmapImage iconSH = LoadImage("HMVTools.Resources.signage_32.png"); 
             if (iconSH != null) btnSH.LargeImage = iconSH;
 
+
            
+            PushButtonData btnConstraints = new PushButtonData(
+                "ConstraintsRelease",
+                "Constraints\nRelease",
+                path,
+                "HMVTools.ConstraintsReleaseCommand");
+            btnConstraints.ToolTip = "Release all constraints from selected objects";
+            btnConstraints.LongDescription = "Removes alignment and parameter constraints (locked dimensions and labels) from the selected instances.";
+            PushButton btnCR = panelFamily.AddItem(btnConstraints) as PushButton;
+            BitmapImage iconCR = LoadImage("HMVTools.Resources.constraints_32.png");
+            if (iconCR != null) btnCR.LargeImage = iconCR;
+
+
+
 
 
             // ── Annotation Tools Panel ──
