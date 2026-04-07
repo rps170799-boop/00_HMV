@@ -8,6 +8,12 @@ using System.Windows.Media;
 
 namespace HMVTools
 {
+    public enum DwgConvertAction
+    {
+        LinesAndTexts,
+        FilledRegions
+    }
+
     public class DwgConvertWindow : Window
     {
         private ListBox listBox;
@@ -15,7 +21,6 @@ namespace HMVTools
         private ComboBox fontCombo;
         private List<string> allItems;
 
-        // Propiedades públicas que leerá el Comando de Revit
         public List<int> SelectedIndices { get; private set; } = new List<int>();
         public string SelectedFont { get; private set; } = "Romans";
         public DwgConvertAction Action { get; private set; }
@@ -30,145 +35,118 @@ namespace HMVTools
             ResizeMode = ResizeMode.NoResize;
             Background = new SolidColorBrush(Color.FromRgb(245, 245, 248));
 
-            // --- INTERFAZ GRÁFICA ---
             var mainGrid = new Grid();
             mainGrid.Margin = new Thickness(20);
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            // 1. Buscador
+            // HEADER
+            var titleText = new TextBlock
+            {
+                Text = "Select DWG Links to Convert",
+                FontWeight = FontWeights.Bold,
+                FontSize = 16,
+                Margin = new Thickness(0, 0, 0, 15),
+                Foreground = new SolidColorBrush(Color.FromRgb(40, 40, 50))
+            };
+            Grid.SetRow(titleText, 0);
+            mainGrid.Children.Add(titleText);
+
+            // SEARCH & LIST
+            var listGrid = new Grid();
+            Grid.SetRow(listGrid, 1);
+            listGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            listGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
             searchBox = new TextBox
             {
                 Margin = new Thickness(0, 0, 0, 10),
-                Padding = new Thickness(5),
-                FontSize = 14
+                Padding = new Thickness(8),
+                Background = Brushes.White
             };
             searchBox.TextChanged += SearchBox_TextChanged;
             Grid.SetRow(searchBox, 0);
-            mainGrid.Children.Add(searchBox);
+            listGrid.Children.Add(searchBox);
 
-            // 2. ListBox
             listBox = new ListBox
             {
-                SelectionMode = SelectionMode.Extended, // Permitir selección múltiple de DWGs
-                Margin = new Thickness(0, 0, 0, 15),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
-                Background = Brushes.White
+                SelectionMode = SelectionMode.Multiple,
+                Background = Brushes.White,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(220, 220, 225)),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(5)
             };
+            foreach (string item in items) listBox.Items.Add(CreateListItem(item));
             Grid.SetRow(listBox, 1);
-            mainGrid.Children.Add(listBox);
+            listGrid.Children.Add(listBox);
 
-            foreach (string item in allItems)
-            {
-                listBox.Items.Add(CreateListItem(item));
-            }
+            mainGrid.Children.Add(listGrid);
 
-            // 3. Opciones de Fuente
+            // BOTTOM PANEL (Font & 2 Buttons)
+            var bottomPanel = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 20, 0, 0) };
+            Grid.SetRow(bottomPanel, 2);
+
             var fontPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 15) };
-            fontPanel.Children.Add(new TextBlock { Text = "Text Font:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0), FontSize = 14 });
-
-            fontCombo = new ComboBox { Width = 150, Padding = new Thickness(4), FontSize = 14 };
-            fontCombo.Items.Add(new ComboBoxItem { Content = "Romans", IsSelected = true });
-            fontCombo.Items.Add(new ComboBoxItem { Content = "Arial" });
-            fontCombo.Items.Add(new ComboBoxItem { Content = "ISOCPEUR" });
-            fontCombo.Items.Add(new ComboBoxItem { Content = "Technic" });
+            fontPanel.Children.Add(new TextBlock { Text = "Text Font:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 10, 0) });
+            fontCombo = new ComboBox { Width = 150, VerticalContentAlignment = VerticalAlignment.Center };
+            fontCombo.Items.Add("Romans");
+            fontCombo.Items.Add("Arial");
+            fontCombo.Items.Add("ISOCPEUR");
+            fontCombo.SelectedIndex = 0;
             fontPanel.Children.Add(fontCombo);
+            bottomPanel.Children.Add(fontPanel);
 
-            Grid.SetRow(fontPanel, 2);
-            mainGrid.Children.Add(fontPanel);
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
 
-            // 4. Botones
-            var btnPanel = new Grid();
-            btnPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            btnPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            Button btnLines = new Button
+            // BUTTON 1: Lines & Texts (Opus stable logic)
+            var btnLinesTexts = new Button
             {
-                Content = "1. Convert Lines",
-                Margin = new Thickness(0, 0, 5, 0),
+                Content = "Convert Lines & Texts",
                 Foreground = Brushes.White,
-                FontSize = 14,
                 FontWeight = FontWeights.Bold,
-                Template = CreateButtonTemplate(Color.FromRgb(52, 152, 219))
+                FontSize = 14,
+                Cursor = Cursors.Hand,
+                Template = CreateButtonTemplate(Color.FromRgb(0, 120, 215)),
+                Margin = new Thickness(0, 0, 10, 0)
             };
-            btnLines.Click += BtnConvertLines_Click; // Lógica conectada
-            Grid.SetColumn(btnLines, 0);
-            btnPanel.Children.Add(btnLines);
+            btnLinesTexts.Click += (s, e) => HandleExecution(DwgConvertAction.LinesAndTexts);
+            buttonPanel.Children.Add(btnLinesTexts);
 
-            Button btnTexts = new Button
+            // BUTTON 2: Filled Regions
+            var btnRegions = new Button
             {
-                Content = "2. Convert Texts",
-                Margin = new Thickness(5, 0, 0, 0),
+                Content = "Convert Filled Regions",
                 Foreground = Brushes.White,
-                FontSize = 14,
                 FontWeight = FontWeights.Bold,
-                Template = CreateButtonTemplate(Color.FromRgb(46, 204, 113))
+                FontSize = 14,
+                Cursor = Cursors.Hand,
+                Template = CreateButtonTemplate(Color.FromRgb(40, 167, 69))
             };
-            btnTexts.Click += BtnStandardizeTexts_Click; // Lógica conectada
-            Grid.SetColumn(btnTexts, 1);
-            btnPanel.Children.Add(btnTexts);
+            btnRegions.Click += (s, e) => HandleExecution(DwgConvertAction.FilledRegions);
+            buttonPanel.Children.Add(btnRegions);
 
-            Grid.SetRow(btnPanel, 3);
-            mainGrid.Children.Add(btnPanel);
-
-            this.Content = mainGrid;
+            bottomPanel.Children.Add(buttonPanel);
+            mainGrid.Children.Add(bottomPanel);
+            Content = mainGrid;
         }
 
-        // --- LÓGICA DE EJECUCIÓN DEL COMANDO ---
-
-        private void BtnConvertLines_Click(object sender, RoutedEventArgs e)
+        private void HandleExecution(DwgConvertAction action)
         {
-            if (SaveSelections())
-            {
-                this.Action = DwgConvertAction.ConvertLines;
-                this.DialogResult = true; // Cierra la UI y permite que Revit ejecute la acción
-            }
-        }
-
-        private void BtnStandardizeTexts_Click(object sender, RoutedEventArgs e)
-        {
-            if (SaveSelections())
-            {
-                this.Action = DwgConvertAction.StandardizeTexts;
-                this.DialogResult = true; // Cierra la UI y permite que Revit ejecute la acción
-            }
-        }
-
-        private bool SaveSelections()
-        {
-            SelectedIndices.Clear();
-
-            // Esto es súper importante: Mapea los seleccionados a la lista original.
-            // Si el usuario buscó "planta", el índice 0 del listbox ya no es el DWG 0.
             foreach (var item in listBox.SelectedItems)
             {
-                if (item is TextBlock tb)
-                {
-                    int originalIndex = allItems.IndexOf(tb.Text);
-                    if (originalIndex >= 0)
-                    {
-                        SelectedIndices.Add(originalIndex);
-                    }
-                }
+                string text = ((TextBlock)item).Text;
+                SelectedIndices.Add(allItems.IndexOf(text));
             }
-
             if (SelectedIndices.Count == 0)
             {
-                MessageBox.Show("Please select at least one DWG from the list.", "HMV Tools", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return false;
+                MessageBox.Show("Please select at least one DWG.");
+                return;
             }
-
-            if (fontCombo.SelectedItem is ComboBoxItem cbi)
-            {
-                SelectedFont = cbi.Content.ToString();
-            }
-
-            return true;
+            SelectedFont = fontCombo.SelectedItem.ToString();
+            Action = action;
+            DialogResult = true;
         }
-
-        // --- MÉTODOS VISUALES Y PLANTILLAS ---
 
         private ControlTemplate CreateButtonTemplate(Color bgColor)
         {
@@ -176,7 +154,7 @@ namespace HMVTools
             var border = new FrameworkElementFactory(typeof(Border));
             border.SetValue(Border.CornerRadiusProperty, new CornerRadius(6));
             border.SetValue(Border.BackgroundProperty, new SolidColorBrush(bgColor));
-            border.SetValue(Border.PaddingProperty, new Thickness(14, 6, 14, 6));
+            border.SetValue(Border.PaddingProperty, new Thickness(14, 10, 14, 10));
 
             var content = new FrameworkElementFactory(typeof(ContentPresenter));
             content.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
@@ -189,11 +167,7 @@ namespace HMVTools
 
         private TextBlock CreateListItem(string text)
         {
-            return new TextBlock
-            {
-                Text = text,
-                Padding = new Thickness(8, 6, 8, 6)
-            };
+            return new TextBlock { Text = text, Padding = new Thickness(8, 6, 8, 6) };
         }
 
         private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -202,8 +176,7 @@ namespace HMVTools
             string filter = searchBox.Text.ToLower();
             foreach (string item in allItems)
             {
-                if (item.ToLower().Contains(filter))
-                    listBox.Items.Add(CreateListItem(item));
+                if (item.ToLower().Contains(filter)) listBox.Items.Add(CreateListItem(item));
             }
         }
     }

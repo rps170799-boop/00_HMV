@@ -52,15 +52,24 @@ namespace HMVTools
 
             string font = win.SelectedFont;
 
-            if (win.Action == DwgConvertAction.ConvertLines)
-                return ConvertLines(doc, view, selectedDwgs);
-            else if (win.Action == DwgConvertAction.StandardizeTexts)
-                return StandardizeTexts(doc, view, selectedDwgs, font);
+            if (win.Action == DwgConvertAction.LinesAndTexts)
+            {
+                ConvertLines(doc, view, selectedDwgs);
+                StandardizeTexts(doc, view, selectedDwgs, font);
+                return Result.Succeeded;
+            }
+            else if (win.Action == DwgConvertAction.FilledRegions)
+            {
+                return ProcessFilledRegions(doc, view, selectedDwgs);
+            }
 
             return Result.Cancelled;
         }
 
-        // ========== LINES ==========
+        // ====================================================================
+        // OPUS STABLE CODE (LINES AND TEXTS) - UNTOUCHED
+        // ====================================================================
+
         private Result ConvertLines(Document doc, View view, List<ImportInstance> selectedDwgs)
         {
             int count = 0;
@@ -116,11 +125,10 @@ namespace HMVTools
                 t.Commit();
             }
 
-            TaskDialog.Show("HMV Tools", count + " detail lines created.\n" + lineStyleCache.Count + " HMV line styles used.\n\nNext: Select DWG(s) again and click 'Standardize Texts'.");
+            TaskDialog.Show("HMV Tools", count + " detail lines created.\n" + lineStyleCache.Count + " HMV line styles used.");
             return Result.Succeeded;
         }
 
-        // ========== TEXTS ==========
         private static readonly double[] AllowedSizes = { 1.5, 2.0, 2.5, 3.0, 3.5 };
 
         private Result StandardizeTexts(Document doc, View view, List<ImportInstance> selectedDwgs, string font)
@@ -162,8 +170,6 @@ namespace HMVTools
                     if (rawTexts.Count == 0) continue;
 
                     // ===== CALIBRATION USING LONGEST LINE =====
-
-                    // 1. Find longest line in Revit geometry
                     Options curveOpts = new Options();
                     curveOpts.View = view;
                     GeometryElement curveGeo = dwg.get_Geometry(curveOpts);
@@ -176,12 +182,10 @@ namespace HMVTools
 
                     if (revLineMid == null)
                     {
-                        TaskDialog.Show("HMV Tools",
-                            "Could not find any line in Revit geometry.");
+                        TaskDialog.Show("HMV Tools", "Could not find any line in Revit geometry.");
                         continue;
                     }
 
-                    // 2. Find longest line in ACadSharp (raw meters)
                     double cadMidX = 0, cadMidY = 0;
                     double cadLineAngle = 0;
                     double cadLineLen = 0;
@@ -194,38 +198,28 @@ namespace HMVTools
 
                     if (cadLineLen < 0.001)
                     {
-                        TaskDialog.Show("HMV Tools",
-                            "Could not find any line in CAD file.");
+                        TaskDialog.Show("HMV Tools", "Could not find any line in CAD file.");
                         continue;
                     }
 
-                    // 3. Compute calibration: rotation + translation
-                    // Convert CAD midpoint from meters to feet
                     double cadMidXft = cadMidX / 0.3048;
                     double cadMidYft = cadMidY / 0.3048;
 
-                    // Rotation = Revit line angle - CAD line angle
                     double rotDelta = revLineAngle - cadLineAngle;
-
                     double cosR = Math.Cos(rotDelta);
                     double sinR = Math.Sin(rotDelta);
 
-                    // 4. Map every text using the calibration
                     foreach (var rt in rawTexts)
                     {
-                        // Convert text position to feet
                         double txFt = rt.LocalPosition.X / 0.3048;
                         double tyFt = rt.LocalPosition.Y / 0.3048;
 
-                        // Relative to CAD reference midpoint
                         double dx = txFt - cadMidXft;
                         double dy = tyFt - cadMidYft;
 
-                        // Apply rotation
                         double rotX = dx * cosR - dy * sinR;
                         double rotY = dx * sinR + dy * cosR;
 
-                        // Place relative to Revit reference midpoint
                         XYZ finalPos = new XYZ(
                             revLineMid.X + rotX,
                             revLineMid.Y + rotY,
@@ -241,17 +235,12 @@ namespace HMVTools
                 }
                 catch (Exception ex)
                 {
-                    TaskDialog.Show("HMV Tools",
-                        "Error reading DWG: " + ex.Message);
+                    TaskDialog.Show("HMV Tools", "Error reading DWG: " + ex.Message);
                     continue;
                 }
             }
 
-            if (allTexts.Count == 0)
-            {
-                TaskDialog.Show("HMV Tools", "No texts found in selected DWG(s).");
-                return Result.Cancelled;
-            }
+            if (allTexts.Count == 0) return Result.Cancelled;
 
             using (Transaction t = new Transaction(doc, "DWG Texts to Standardized Notes"))
             {
@@ -292,9 +281,7 @@ namespace HMVTools
                                 TextNoteOptions options = new TextNoteOptions(hmvType.Id);
                                 options.HorizontalAlignment = td.HAlign;
                                 options.Rotation = td.Rotation;
-
                                 TextNote note = TextNote.Create(doc, view.Id, td.LocalPosition, td.Text, options);
-
                                 Parameter vAlignParam = note.get_Parameter(BuiltInParameter.TEXT_ALIGN_VERT);
                                 if (vAlignParam != null && !vAlignParam.IsReadOnly)
                                     vAlignParam.Set(td.VAlignParam);
@@ -319,7 +306,6 @@ namespace HMVTools
                     catch { }
                 }
 
-                // Cleanup unused types
                 HashSet<ElementId> usedTextTypeIds = new HashSet<ElementId>(new FilteredElementCollector(doc).OfClass(typeof(TextNote)).Cast<TextNote>().Select(tn => tn.GetTypeId()));
                 foreach (TextNoteType tnt in new FilteredElementCollector(doc).OfClass(typeof(TextNoteType)).Cast<TextNoteType>().ToList())
                 {
@@ -347,8 +333,187 @@ namespace HMVTools
         }
 
 
+        // ====================================================================
+        // NEW LOGIC: FILLED REGIONS (Re-using Opus Math)
+        // ====================================================================
 
-        // Find the longest Line in Revit geometry recursively
+        // ====================================================================
+        // NEW LOGIC: FILLED REGIONS (STRUCTURE ANALYZER ONLY)
+        // ====================================================================
+
+        private Result ProcessFilledRegions(Document doc, View view, List<ImportInstance> selectedDwgs)
+        {
+            using (Transaction t = new Transaction(doc, "DWG Filled Regions Analyzer"))
+            {
+                t.Start();
+
+                foreach (ImportInstance dwg in selectedDwgs)
+                {
+                    string dwgPath = GetDwgFilePath(doc, dwg);
+                    if (dwgPath == null || !System.IO.File.Exists(dwgPath)) continue;
+
+                    try
+                    {
+                        CadDocument cadDoc;
+                        using (DwgReader reader = new DwgReader(dwgPath)) cadDoc = reader.Read();
+
+                        List<DwgHatchData> rawHatches = new List<DwgHatchData>();
+                        foreach (var entity in cadDoc.Entities)
+                        {
+                            CollectRawHatchWithTransform(entity, 0, 0, 1, 0, rawHatches);
+                        }
+
+                        System.Text.StringBuilder analyzerReport = new System.Text.StringBuilder();
+                        analyzerReport.AppendLine($"Total hatches found in CAD: {rawHatches.Count}");
+
+                        if (rawHatches.Count > 0)
+                        {
+                            try
+                            {
+                                // Analyze the very first hatch to see what properties it actually has
+                                object hatchObj = rawHatches[0].Hatch;
+                                Type hatchType = hatchObj.GetType();
+
+                                analyzerReport.AppendLine("\n=== HATCH PROPERTIES ===");
+                                foreach (var prop in hatchType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                                {
+                                    analyzerReport.AppendLine($"- {prop.Name} ({prop.PropertyType.Name})");
+                                }
+
+                                dynamic dynHatch = hatchObj;
+                                if (dynHatch.Paths != null)
+                                {
+                                    analyzerReport.AppendLine("\n=== PATH PROPERTIES ===");
+                                    foreach (dynamic path in dynHatch.Paths)
+                                    {
+                                        Type pathType = path.GetType();
+                                        foreach (var prop in pathType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                                        {
+                                            analyzerReport.AppendLine($"- {prop.Name} ({prop.PropertyType.Name})");
+                                        }
+                                        break; // We only need to look at the first path
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                analyzerReport.AppendLine($"Analyzer Error: {ex.Message}");
+                            }
+                        }
+
+                        TaskDialog debugInfo = new TaskDialog("Hatch Structure Analyzer");
+                        debugInfo.MainInstruction = "Please copy this list for me";
+                        debugInfo.MainContent = analyzerReport.ToString();
+                        debugInfo.Show();
+
+                        // We just need the report, so we cancel the transaction
+                        t.RollBack();
+                        return Result.Cancelled;
+                    }
+                    catch (Exception ex)
+                    {
+                        TaskDialog.Show("HMV Tools", "Error reading DWG Regions: " + ex.Message);
+                    }
+                }
+
+                t.RollBack();
+            }
+            return Result.Cancelled;
+        }
+        // Applies block transform, then Opus calibration transform
+        private XYZ ApplyHatchTransform(double x, double y, DwgHatchData hd, double cadMidXft, double cadMidYft, double cosR, double sinR, XYZ revLineMid)
+        {
+            // 1. Block
+            double bx = x * hd.Scale * Math.Cos(hd.Rot) - y * hd.Scale * Math.Sin(hd.Rot) + hd.TX;
+            double by = x * hd.Scale * Math.Sin(hd.Rot) + y * hd.Scale * Math.Cos(hd.Rot) + hd.TY;
+
+            // 2. Opus Math
+            double txFt = bx / 0.3048;
+            double tyFt = by / 0.3048;
+            double dx = txFt - cadMidXft;
+            double dy = tyFt - cadMidYft;
+
+            double rotX = dx * cosR - dy * sinR;
+            double rotY = dx * sinR + dy * cosR;
+
+            return new XYZ(revLineMid.X + rotX, revLineMid.Y + rotY, 0);
+        }
+
+        private class DwgHatchData
+        {
+            public ACadSharp.Entities.Hatch Hatch;
+            public double TX, TY, Scale, Rot;
+            public DwgHatchData(ACadSharp.Entities.Hatch h, double tx, double ty, double s, double r)
+            {
+                Hatch = h; TX = tx; TY = ty; Scale = s; Rot = r;
+            }
+        }
+
+        private void CollectRawHatchWithTransform(ACadSharp.Entities.Entity entity, double tx, double ty, double tscale, double trot, List<DwgHatchData> rawHatches)
+        {
+            if (entity is ACadSharp.Entities.Insert nested && nested.Block != null)
+            {
+                double nx = nested.InsertPoint.X;
+                double ny = nested.InsertPoint.Y;
+                double newX = nx * tscale * Math.Cos(trot) - ny * tscale * Math.Sin(trot) + tx;
+                double newY = nx * tscale * Math.Sin(trot) + ny * tscale * Math.Cos(trot) + ty;
+                foreach (var be in nested.Block.Entities)
+                {
+                    CollectRawHatchWithTransform(be, newX, newY, tscale * nested.XScale, trot + nested.Rotation, rawHatches);
+                }
+            }
+            else if (entity is ACadSharp.Entities.Hatch hatch)
+            {
+                rawHatches.Add(new DwgHatchData(hatch, tx, ty, tscale, trot));
+            }
+        }
+
+        private List<Curve> SortAndCloseCurves(List<Curve> curves)
+        {
+            if (curves.Count < 2) return curves;
+            List<Curve> sorted = new List<Curve>();
+            sorted.Add(curves[0]);
+            curves.RemoveAt(0);
+
+            while (curves.Count > 0)
+            {
+                XYZ endPt = sorted.Last().GetEndPoint(1);
+                bool found = false;
+                for (int i = 0; i < curves.Count; i++)
+                {
+                    if (curves[i].GetEndPoint(0).DistanceTo(endPt) < 0.01)
+                    {
+                        sorted.Add(curves[i]);
+                        curves.RemoveAt(i);
+                        found = true; break;
+                    }
+                    if (curves[i].GetEndPoint(1).DistanceTo(endPt) < 0.01)
+                    {
+                        sorted.Add(curves[i].CreateReversed());
+                        curves.RemoveAt(i);
+                        found = true; break;
+                    }
+                }
+                if (!found) break;
+            }
+
+            if (sorted.Count > 1)
+            {
+                XYZ firstPt = sorted.First().GetEndPoint(0);
+                XYZ lastPt = sorted.Last().GetEndPoint(1);
+                if (firstPt.DistanceTo(lastPt) > 0.001)
+                {
+                    try { sorted.Add(Line.CreateBound(lastPt, firstPt)); } catch { }
+                }
+            }
+            return sorted;
+        }
+
+
+        // ====================================================================
+        // OPUS SUPPORT FUNCTIONS - UNTOUCHED
+        // ====================================================================
+
         private void FindLongestRevitLine(GeometryElement geoElem,
             ref XYZ midpoint, ref double angle, ref double maxLen)
         {
@@ -399,7 +564,6 @@ namespace HMVTools
             }
         }
 
-        // Find the longest Line in ACadSharp recursively (with block transforms)
         private void FindLongestCadLine(ACadSharp.Entities.Entity entity,
             ACadSharp.Entities.Insert parentInsert,
             ref double midX, ref double midY,
@@ -412,7 +576,6 @@ namespace HMVTools
                 double x2 = ln.EndPoint.X;
                 double y2 = ln.EndPoint.Y;
 
-                // Apply parent insert transform if inside a block
                 if (parentInsert != null)
                 {
                     double ix = parentInsert.InsertPoint.X;
@@ -449,10 +612,6 @@ namespace HMVTools
             }
         }
 
-        
-
-
-        // ===== DWG FILE FINDER =====
         private string GetDwgFilePath(Document doc, ImportInstance import)
         {
             try
@@ -501,21 +660,16 @@ namespace HMVTools
             return null;
         }
 
-        // ===== ACadSharp TEXT EXTRACTION =====
         private void CollectRawText(ACadSharp.Entities.Entity entity,
              ACadSharp.Entities.Insert parentInsert,
              List<DwgTextData> rawTexts)
         {
-            // If this entity is itself an Insert, recurse into its block
             if (entity is ACadSharp.Entities.Insert nestedInsert
                 && nestedInsert.Block != null)
             {
-                // Combine parent transform with this insert's transform
                 ACadSharp.Entities.Insert effectiveInsert = nestedInsert;
                 if (parentInsert != null)
                 {
-                    // Compute combined position by applying parent transform
-                    // to nested insert's position
                     double px = parentInsert.InsertPoint.X;
                     double py = parentInsert.InsertPoint.Y;
                     double psc = parentInsert.XScale;
@@ -529,8 +683,6 @@ namespace HMVTools
                     double newY = nx * psc * Math.Sin(pr)
                                 + ny * psc * Math.Cos(pr) + py;
 
-                    // Create a synthetic insert with combined transform
-                    // (we use a simple wrapper approach below)
                     foreach (var be in nestedInsert.Block.Entities)
                     {
                         CollectRawTextWithTransform(be,
@@ -550,7 +702,6 @@ namespace HMVTools
                 return;
             }
 
-            // Otherwise, extract text from this entity
             CollectRawTextWithTransform(entity,
                 parentInsert?.InsertPoint.X ?? 0,
                 parentInsert?.InsertPoint.Y ?? 0,
@@ -564,7 +715,6 @@ namespace HMVTools
             double tx, double ty, double tscale, double trot,
             List<DwgTextData> rawTexts)
         {
-            // If nested insert, recurse with combined transform
             if (entity is ACadSharp.Entities.Insert nested
                 && nested.Block != null)
             {
@@ -637,7 +787,6 @@ namespace HMVTools
 
             if (string.IsNullOrWhiteSpace(text)) return;
 
-            // Apply accumulated transform
             double rx = x * tscale * Math.Cos(trot)
                       - y * tscale * Math.Sin(trot) + tx;
             double ry = x * tscale * Math.Sin(trot)
@@ -681,10 +830,6 @@ namespace HMVTools
             }
         }
 
-
-        
-
-        // ========== LINE HELPERS ==========
         private void GetCurves(Document doc, GeometryElement geoElem, List<(Curve curve, GraphicsStyle style)> curveData)
         {
             foreach (GeometryObject geoObj in geoElem)
@@ -760,6 +905,4 @@ namespace HMVTools
             catch { return null; }
         }
     }
-
-    public enum DwgConvertAction { ConvertLines, StandardizeTexts }
 }

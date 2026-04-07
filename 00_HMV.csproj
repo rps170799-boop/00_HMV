@@ -173,54 +173,30 @@
     <None Include="mkdocs.yml" />
     <None Include="packages.config" />
   </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\ductos_32.png" />
-    <EmbeddedResource Include="Resources\dwg_32.png" />
-    <EmbeddedResource Include="Resources\gridlevel_32.png" />
-    <EmbeddedResource Include="Resources\pipeannotation_32.png" />
-    <EmbeddedResource Include="Resources\topo_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\textaudit_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\viewaudit_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\refreshz_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\spotelev_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\sheetaudit_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\multiparam_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\annottag_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\alignspot_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\dwg3d_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\dimaudit_32.png" />
-    <EmbeddedResource Include="Resources\foundation_32.png" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\familyaudit_32.png" />
-  </ItemGroup>
   <ItemGroup />
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\alignspot_32.png" />
+    <EmbeddedResource Include="Resources\annottag_32.png" />
     <EmbeddedResource Include="Resources\constraints_32.png" />
-    <EmbeddedResource Include="Resources\signage_32.png" />
-    <EmbeddedResource Include="Resources\migrate_32.png" />
+    <EmbeddedResource Include="Resources\dimaudit_32.png" />
+    <EmbeddedResource Include="Resources\ductos_32.png" />
+    <EmbeddedResource Include="Resources\dwg3d_32.png" />
+    <EmbeddedResource Include="Resources\dwg_32.png" />
+    <EmbeddedResource Include="Resources\familyaudit_32.png" />
+    <EmbeddedResource Include="Resources\foundation_32.png" />
+    <EmbeddedResource Include="Resources\gridlevel_32.png" />
     <EmbeddedResource Include="Resources\linkaudit_32.png" />
+    <EmbeddedResource Include="Resources\migrate_32.png" />
+    <EmbeddedResource Include="Resources\multiparam_32.png" />
+    <EmbeddedResource Include="Resources\pipeannotation_32.png" />
+    <EmbeddedResource Include="Resources\refreshz_32.png" />
+    <EmbeddedResource Include="Resources\sheetaudit_32.png" />
+    <EmbeddedResource Include="Resources\signage_32.png" />
+    <EmbeddedResource Include="Resources\spotelev_32.png" />
+    <EmbeddedResource Include="Resources\textaudit_32.png" />
+    <EmbeddedResource Include="Resources\topo_32.png" />
+    <EmbeddedResource Include="Resources\viewaudit_32.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
