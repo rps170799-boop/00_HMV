@@ -26,6 +26,7 @@ namespace HMVTools
 
         // Controls
         private ComboBox targetDocCombo;
+        private TextBox viewSearchBox;
         private StackPanel viewListPanel;
         private CheckBox chkAnnotations;
         private CheckBox chkRefMarkers;
@@ -72,10 +73,11 @@ namespace HMVTools
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 1 Source info
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 2 Target combo
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 3 "Views" label
-            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 4 View list
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 5 Options
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 6 Status
-            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 7 Buttons
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 4 Search box  ← NEW
+            root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // 5 View list
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 6 Options
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });                      // 7 Status
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             // ── 0: Title ───────────────────────────────────────
             var title = new TextBlock
@@ -177,10 +179,33 @@ namespace HMVTools
                 Content = viewListPanel
             };
             listBorder.Child = scroll;
-            Grid.SetRow(listBorder, 4);
+            Grid.SetRow(listBorder, 5);
             root.Children.Add(listBorder);
 
             PopulateViewList();
+
+            // ── 4: Search box ──────────────────────────────────
+            var searchBorder = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                BorderBrush = new SolidColorBrush(BorderColor),
+                BorderThickness = new Thickness(1),
+                Background = Brushes.White,
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+            viewSearchBox = new TextBox
+            {
+                Height = 28,
+                FontSize = 12,
+                BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent,
+                Padding = new Thickness(8, 4, 8, 4),
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            viewSearchBox.TextChanged += (s, e) => ApplyViewFilter();
+            searchBorder.Child = viewSearchBox;
+            Grid.SetRow(searchBorder, 4);
+            root.Children.Add(searchBorder);
 
             // ── 5: Options ─────────────────────────────────────
             var optPanel = new StackPanel
@@ -201,7 +226,7 @@ namespace HMVTools
             };
             optPanel.Children.Add(chkAnnotations);
             optPanel.Children.Add(chkRefMarkers);
-            Grid.SetRow(optPanel, 5);
+            Grid.SetRow(optPanel, 6);
             root.Children.Add(optPanel);
 
             // ── 6: Status ──────────────────────────────────────
@@ -212,7 +237,7 @@ namespace HMVTools
                 Foreground = new SolidColorBrush(MutedText),
                 Margin = new Thickness(0, 0, 0, 10)
             };
-            Grid.SetRow(statusText, 6);
+            Grid.SetRow(statusText, 7);
             root.Children.Add(statusText);
             UpdateStatus();
 
@@ -237,14 +262,55 @@ namespace HMVTools
 
             btnPanel.Children.Add(cancelBtn);
             btnPanel.Children.Add(migrateBtn);
-            Grid.SetRow(btnPanel, 7);
+            Grid.SetRow(btnPanel, 8);
             root.Children.Add(btnPanel);
 
             return root;
         }
 
         // ── View list ──────────────────────────────────────────
+        private void ApplyViewFilter()
+        {
+            string q = (viewSearchBox.Text ?? string.Empty).Trim();
+            bool empty = q.Length == 0;
 
+            // Walk the panel children. Headers are CheckBoxes whose Tag is null;
+            // view rows are CheckBoxes whose Tag is the view id (int).
+            CheckBox currentHeader = null;
+            int visibleInGroup = 0;
+
+            var children = viewListPanel.Children;
+            for (int i = 0; i < children.Count; i++)
+            {
+                var cb = children[i] as CheckBox;
+                if (cb == null) continue;
+
+                if (cb.Tag == null)
+                {
+                    // It's a category header — finalize the previous group first
+                    if (currentHeader != null)
+                        currentHeader.Visibility = visibleInGroup > 0
+                            ? Visibility.Visible : Visibility.Collapsed;
+
+                    currentHeader = cb;
+                    visibleInGroup = 0;
+                }
+                else
+                {
+                    // It's a view row
+                    string name = cb.Content?.ToString() ?? string.Empty;
+                    bool match = empty
+                        || name.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0;
+                    cb.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
+                    if (match) visibleInGroup++;
+                }
+            }
+
+            // Finalize the last group
+            if (currentHeader != null)
+                currentHeader.Visibility = visibleInGroup > 0
+                    ? Visibility.Visible : Visibility.Collapsed;
+        }
         private void PopulateViewList()
         {
             viewListPanel.Children.Clear();

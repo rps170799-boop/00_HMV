@@ -238,47 +238,91 @@ namespace HMVTools
         }
 
         private static void CopyViewBatch(
-            Document source,
-            Document target,
-            List<ElementId> ids,
-            Transform transform,
-            CopyPasteOptions opts,
-            Dictionary<ElementId, ElementId> viewMap,
-            TransferResult result,
-            string batchLabel)
+     Document source,
+     Document target,
+     List<ElementId> ids,
+     Transform transform,
+     CopyPasteOptions opts,
+     Dictionary<ElementId, ElementId> viewMap,
+     TransferResult result,
+     string batchLabel)
         {
             using (var t = new Transaction(target,
                 $"HMV – Copy {batchLabel} Views"))
             {
                 t.Start();
-                try
+
+                int failures = 0;
+
+                // Copy one view at a time so the source→target pairing is
+                // unambiguous (CopyElements does NOT guarantee return order
+                // matches input order). Each view is wrapped in its own
+                // SubTransaction so a single failure doesn't poison the
+                // parent transaction or kill the rest of the batch.
+                foreach (var srcId in ids)
                 {
-                    ICollection<ElementId> copiedIds =
-                        ElementTransformUtils.CopyElements(
-                            source, ids, target,
-                            transform, opts);
-
-                    var srcList = ids;
-                    var tgtList = copiedIds.ToList();
-
-                    for (int i = 0; i < srcList.Count
-                                  && i < tgtList.Count; i++)
+                    string viewName = "(unknown)";
+                    try
                     {
-                        viewMap[srcList[i]] = tgtList[i];
+                        View v = source.GetElement(srcId) as View;
+                        if (v != null) viewName = v.Name;
                     }
+                    catch { /* name lookup is best-effort */ }
 
-                    result.ViewsCreated += tgtList.Count;
+                    using (var sub = new SubTransaction(target))
+                    {
+                        try
+                        {
+                            sub.Start();
+
+                            var single = new List<ElementId> { srcId };
+
+                            ICollection<ElementId> copied =
+                                ElementTransformUtils.CopyElements(
+                                    source, single, target, transform, opts);
+
+                            if (copied != null && copied.Count > 0)
+                            {
+                                viewMap[srcId] = copied.First();
+                                result.ViewsCreated++;
+                                sub.Commit();
+                            }
+                            else
+                            {
+                                sub.RollBack();
+                                failures++;
+                                result.Warnings.Add(
+                                    $"View '{viewName}' (Id {srcId.IntegerValue}) "
+                                    + "produced no copy result, skipped.");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            if (sub.HasStarted() && !sub.HasEnded())
+                                sub.RollBack();
+
+                            failures++;
+                            result.Warnings.Add(
+                                $"View '{viewName}' (Id {srcId.IntegerValue}) "
+                                + $"failed to copy, skipped: {ex.Message}");
+                        }
+                    }
+                }
+
+                // Commit whatever succeeded. We only fail the whole batch if
+                // literally nothing went through.
+                if (viewMap.Count > 0 || failures < ids.Count)
+                {
                     t.Commit();
                 }
-                catch (Exception ex)
+                else
                 {
                     t.RollBack();
                     result.Errors.Add(
-                        $"Copy {batchLabel} views failed: {ex.Message}");
+                        $"Copy {batchLabel} views: all {ids.Count} views failed.");
                 }
             }
         }
-
         /// <summary>
         /// Copies source view templates into the target document
         /// and assigns them to the migrated views.
