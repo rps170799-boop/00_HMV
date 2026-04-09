@@ -114,6 +114,7 @@
   <ItemGroup>
     <Compile Include="App.cs" />
     <Compile Include="Commands\Annotation\AlignSpotElevationsCommand.cs" />
+    <Compile Include="Commands\Annotation\AutoDimensionWindow.cs" />
     <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
     <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
@@ -130,7 +131,19 @@
     <Compile Include="Commands\FamilyControl\SignageHostingCommand.cs" />
     <Compile Include="Helpers\Migrationdataclasses.cs" />
     <Compile Include="Helpers\Transfermanager.cs" />
+    <Compile Include="WindowUI\Audit\Viewauditwindow.xaml.cs">
+      <DependentUpon>Viewauditwindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
+    <Compile Include="WindowUI\Annotation\AutoDimensionWindow.xaml.cs">
+      <DependentUpon>AutoDimensionWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Annotation\PipeAnnotationWindow.xaml.cs">
+      <DependentUpon>PipeAnnotationWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.xaml.cs">
+      <DependentUpon>Gridlevelextentwindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.cs" />
     <Compile Include="WindowUI\Transfer\Migrateelementswindow.cs" />
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
@@ -143,14 +156,11 @@
     <Compile Include="WindowUI\Audit\LinkedFilesAuditWindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
     <Compile Include="WindowUI\Audit\Textauditconfigwindow.cs" />
-    <Compile Include="WindowUI\Audit\Viewauditwindow.cs" />
     <Compile Include="WindowUI\DWG\Dwg3dprogresswindow.cs" />
     <Compile Include="WindowUI\DWG\Dwg3dtoshapewindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
     <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
     <Compile Include="Commands\Annotation\Gridlevelextentcommand.cs" />
-    <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.cs" />
-    <Compile Include="WindowUI\Annotation\Pipeannotationwindow.cs" />
     <Compile Include="Commands\Annotation\Placeannotationsalongpipecmd.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Commands\Audit\Textauditcommand.cs" />
@@ -173,9 +183,27 @@
     <None Include="mkdocs.yml" />
     <None Include="packages.config" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Page Include="WindowUI\Audit\Viewauditwindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\Annotation\AutoDimensionWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\Annotation\PipeAnnotationWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\Annotation\Gridlevelextentwindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\autodim_32.png" />
+    <EmbeddedResource Include="Resources\signage_32.png" />
     <EmbeddedResource Include="Resources\alignspot_32.png" />
     <EmbeddedResource Include="Resources\annottag_32.png" />
     <EmbeddedResource Include="Resources\constraints_32.png" />
@@ -192,7 +220,6 @@
     <EmbeddedResource Include="Resources\pipeannotation_32.png" />
     <EmbeddedResource Include="Resources\refreshz_32.png" />
     <EmbeddedResource Include="Resources\sheetaudit_32.png" />
-    <EmbeddedResource Include="Resources\signage_32.png" />
     <EmbeddedResource Include="Resources\spotelev_32.png" />
     <EmbeddedResource Include="Resources\textaudit_32.png" />
     <EmbeddedResource Include="Resources\topo_32.png" />

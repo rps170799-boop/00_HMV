@@ -1,0 +1,207 @@
+<Window x:Class="HMVTools.ViewAuditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - View Audit"
+        Height="500" Width="750"
+        MinWidth="750" MinHeight="500"
+        WindowStyle="None" AllowsTransparency="True"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip"
+        Background="Transparent">
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="70"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White" Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" | View Audit" Foreground="White" FontSize="10" Margin="5,2,0,0"/>
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="✕" Click="BtnClose_Click" Background="Transparent" 
+                        Foreground="White" BorderThickness="0" Width="50" FontSize="14" Cursor="Hand"/>
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="20,15,20,5">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="#F4F4F6" CornerRadius="6" Padding="15,10" Margin="0,0,0,10" BorderBrush="#E0E0E0" BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="100"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Add Prefix:" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#1E1E1E"/>
+                        <Border Grid.Row="0" Grid.Column="1" BorderBrush="#C8C8D2" BorderThickness="1"  Background="White" Margin="0,0,10,8">
+                            <TextBox x:Name="txtPrefix" Height="24"  FontSize="11" VerticalContentAlignment="Center" BorderThickness="0" Padding="5,0"/>
+                        </Border>
+                        <Button Grid.Row="0" Grid.Column="2" Content="Apply Prefix" FontSize="10" FontWeight="SemiBold" Height="26" Width="100" Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,0,8" Click="BtnApplyPrefix_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Remove Text:" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="#1E1E1E"/>
+                        <Border Grid.Row="1" Grid.Column="1" BorderBrush="#C8C8D2" BorderThickness="1"  Background="White" Margin="0,0,10,0">
+                            <TextBox x:Name="txtCut" Height="24" FontSize="11" VerticalContentAlignment="Center" BorderThickness="0" Padding="5,0"/>
+                        </Border>
+                        <Button Grid.Row="1" Grid.Column="2" Content="Apply Remove" FontSize="10" FontWeight="SemiBold" Height="26" Width="100" Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnApplyCut_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="200"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
+                        <TextBox x:Name="txtSearch" Height="26" FontSize="11" VerticalContentAlignment="Center" BorderThickness="0" Background="Transparent" Padding="10,0,10,0" TextChanged="SearchBox_TextChanged"/>
+                    </Border>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Content="Select All" FontSize="10" FontWeight="SemiBold" Height="26" Width="80" Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0" Click="BtnSelectAll_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+                        <Button Content="Clear Sel." FontSize="10" FontWeight="SemiBold" Height="26" Width="80" Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0" Click="BtnClear_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+                        <Button Content="Reset Names" FontSize="10" FontWeight="SemiBold" Height="26" Width="90" Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnReset_Click">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="2" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" ClipToBounds="True">
+                    <DataGrid x:Name="dgViews" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" 
+                              Background="Transparent" BorderThickness="0" RowBackground="#FFFFFF" AlternatingRowBackground="#F9F9F9"
+                              HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E0E0E0"
+                              FontSize="11" RowHeight="28" SelectionUnit="Cell" ClipboardCopyMode="IncludeHeader">
+
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="#F0F0F3"/>
+                                <Setter Property="Foreground" Value="#1E1E1E"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                <Setter Property="Padding" Value="10,6"/>
+                                <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                                <Setter Property="BorderBrush" Value="#C8C8D2"/>
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Width="40">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" 
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center" 
+                                                  Click="CheckBox_Click"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="Type" Binding="{Binding ViewType}" IsReadOnly="True" Width="100"/>
+                            <DataGridTextColumn Header="Current Name" Binding="{Binding OriginalName}" IsReadOnly="True" Width="180"/>
+                            <DataGridTextColumn Header="Sheets" Binding="{Binding Sheets}" IsReadOnly="True" Width="130"/>
+
+                            <DataGridTextColumn Header="New Name (Edit)" Binding="{Binding NewName, UpdateSourceTrigger=PropertyChanged}" Width="*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Opacity" Value="0.5"/>
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="Padding" Value="2,0,0,0"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding NameChanged}" Value="True">
+                                                <Setter Property="Opacity" Value="1.0"/>
+                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                                <DataGridTextColumn.EditingElementStyle>
+                                    <Style TargetType="TextBox">
+                                        <Setter Property="BorderThickness" Value="0"/>
+                                        <Setter Property="Padding" Value="2"/>
+                                    </Style>
+                                </DataGridTextColumn.EditingElementStyle>
+                            </DataGridTextColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock x:Name="lblTotal" Text="Total Views: 0" FontSize="11" Foreground="#787882" Margin="0,0,15,0"/>
+                    <TextBlock x:Name="lblSelected" Text="Selected: 0" FontSize="11" Foreground="#787882" Margin="0,0,15,0"/>
+                    <TextBlock x:Name="lblModified" Text="Names Modified: 0" FontSize="11" Foreground="#787882"/>
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
+                <Button Content="Cancel" FontSize="11" Height="30" Width="150" Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0" Cursor="Hand" Margin="0,0,10,0" Click="BtnCancel_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+
+                <Button Content="Apply Changes" FontSize="11" FontWeight="Bold" Height="30" Width="150" Background="#E9AA00" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnApply_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

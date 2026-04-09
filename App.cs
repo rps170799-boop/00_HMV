@@ -231,6 +231,26 @@ namespace HMVTools
             RibbonPanel panelAnnot = app.CreateRibbonPanel("HMV Tools", "Annotation Tools");
 
 
+            PushButtonData btnAutoDim = new PushButtonData(
+                "AutoDimension",
+                "Auto\nDimension",
+                path,
+                "HMVTools.AutoDimensionCommand");
+            btnAutoDim.ToolTip = "Automatically dimension intersecting walls along a selected line";
+            btnAutoDim.LongDescription =
+                "Creates a dimension segment along a selected Detail or Model Line, "
+                + "automatically detecting and dimensioning intersecting walls.\n\n"
+                + "Features:\n"
+                + "• Interactive tolerance setting to skip close lines\n"
+                + "• Auto-offset for text to prevent collisions on small dimensions\n"
+                + "• Works with straight drawn lines acting as a dimension path";
+
+            PushButton btnAD = panelAnnot.AddItem(btnAutoDim) as PushButton;
+
+            // Note: Remember to add a 32x32 icon named 'autodim_32.png' to your project Resources!
+            BitmapImage iconAD = LoadImage("HMVTools.Resources.autodim_32.png");
+            if (iconAD != null) btnAD.LargeImage = iconAD;
+
             PushButtonData btnTopoLines = new PushButtonData(
                 "TopoToLines",
                 "Topo to\nLines",
