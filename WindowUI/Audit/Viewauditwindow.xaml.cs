@@ -13,7 +13,23 @@ namespace HMVTools
     {
         public int ElementId { get; set; }
         public string ViewType { get; set; }
-        public string OriginalName { get; set; }
+
+        // 1. Modificado para que actualice la UI al guardar
+        private string _originalName;
+        public string OriginalName
+        {
+            get => _originalName;
+            set
+            {
+                if (_originalName != value)
+                {
+                    _originalName = value;
+                    OnPropertyChanged(nameof(OriginalName));
+                    OnPropertyChanged(nameof(NameChanged));
+                }
+            }
+        }
+
         public bool HasConflict { get; set; }
 
         private string _newName;
@@ -62,9 +78,12 @@ namespace HMVTools
         private ObservableCollection<ViewAuditEntry> AllEntries;
         private ObservableCollection<ViewAuditEntry> FilteredEntries;
         private HashSet<string> AllViewTypeNames;
-        private int lastCheckedIndex = -1; // Memory for Shift+Click selection
 
         public List<ViewAuditEntry> Results => AllEntries.ToList();
+
+        public Action<List<ViewAuditEntry>> ApplyAction { get; set; }
+
+       
 
         public ViewAuditWindow(List<ViewAuditEntry> data, HashSet<string> allViewTypeNames)
         {
@@ -104,20 +123,60 @@ namespace HMVTools
             this.Close();
         }
 
+        // ── LÓGICA DE APLICAR CORREGIDA ──
+        // ── Apply Action ──
         private void BtnApply_Click(object sender, RoutedEventArgs e)
         {
             dgViews.CommitEdit();
             dgViews.CommitEdit();
 
-            var modifiedCount = AllEntries.Count(x => x.NameChanged);
-            if (modifiedCount == 0)
+            var modifiedItems = AllEntries.Where(x => x.NameChanged).ToList();
+            if (modifiedItems.Count == 0)
             {
                 MessageBox.Show("No view names have been modified.", "HMV Tools", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            this.DialogResult = true;
-            this.Close();
+            // Execute the Revit Transaction defined in the Command
+            if (ApplyAction != null)
+            {
+                try
+                {
+                    // 1. Apply changes in Revit in real-time
+                    ApplyAction.Invoke(modifiedItems);
+
+                    // 2. Update the table so the names are no longer bold (since they are saved)
+                    foreach (var item in modifiedItems)
+                    {
+                        item.OriginalName = item.NewName;
+                    }
+
+                    
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error applying changes: " + ex.Message, "HMV Tools Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        // ── Lógica de Selección Real en Bloque ──
+        private void RowCheckBox_Click(object sender, RoutedEventArgs e)
+        {
+            var cb = sender as CheckBox;
+            var clickedItem = cb?.DataContext as ViewAuditEntry;
+
+            if (clickedItem == null) return;
+
+            bool isChecked = cb.IsChecked == true;
+
+            if (dgViews.SelectedItems.Contains(clickedItem))
+            {
+                foreach (var item in dgViews.SelectedItems.Cast<ViewAuditEntry>())
+                {
+                    item.IsSelected = isChecked;
+                }
+            }
         }
 
         // ── Independent Mass Edit Logic ──
@@ -139,7 +198,7 @@ namespace HMVTools
 
             foreach (var item in selectedItems)
             {
-                item.NewName = prefixInput + item.NewName; // Applies to current NewName to allow stacking operations
+                item.NewName = prefixInput + item.NewName;
             }
         }
 
@@ -168,31 +227,21 @@ namespace HMVTools
             }
         }
 
-        // ── Shift+Click Multiselect Logic ──
-        private void CheckBox_Click(object sender, RoutedEventArgs e)
+        // ── Checkbox Lógica para Vistas Filtradas ──
+        private void ChkSelectFiltered_Checked(object sender, RoutedEventArgs e)
         {
-            var cb = sender as CheckBox;
-            var row = DataGridRow.GetRowContainingElement(cb);
-            if (row == null) return;
-
-            int currentIndex = row.GetIndex();
-            bool isShiftPressed = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
-            bool targetState = cb.IsChecked == true;
-
-            if (isShiftPressed && lastCheckedIndex != -1)
+            foreach (var item in FilteredEntries)
             {
-                int start = Math.Min(lastCheckedIndex, currentIndex);
-                int end = Math.Max(lastCheckedIndex, currentIndex);
-
-                for (int i = start; i <= end; i++)
-                {
-                    if (i < FilteredEntries.Count)
-                    {
-                        FilteredEntries[i].IsSelected = targetState;
-                    }
-                }
+                item.IsSelected = true;
             }
-            lastCheckedIndex = currentIndex;
+        }
+
+        private void ChkSelectFiltered_Unchecked(object sender, RoutedEventArgs e)
+        {
+            foreach (var item in FilteredEntries)
+            {
+                item.IsSelected = false;
+            }
         }
 
         // ── Filtering and Tools ──
@@ -200,7 +249,11 @@ namespace HMVTools
         {
             string filter = txtSearch.Text.ToLower();
             FilteredEntries.Clear();
-            lastCheckedIndex = -1; // Reset memory when filtering
+
+            if (chkSelectFiltered != null)
+            {
+                chkSelectFiltered.IsChecked = false;
+            }
 
             foreach (var item in AllEntries)
             {
@@ -228,7 +281,6 @@ namespace HMVTools
             {
                 item.IsSelected = false;
             }
-            lastCheckedIndex = -1;
         }
 
         private void BtnReset_Click(object sender, RoutedEventArgs e)

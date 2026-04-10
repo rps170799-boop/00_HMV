@@ -6,7 +6,8 @@
         WindowStyle="None" AllowsTransparency="True"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
-        Background="Transparent">
+        Background="Transparent"
+        FontFamily="Roboto,Arial, Segoe UI">
 
     <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
         <Grid>

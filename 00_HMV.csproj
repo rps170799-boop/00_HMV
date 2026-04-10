@@ -131,6 +131,9 @@
     <Compile Include="Commands\FamilyControl\SignageHostingCommand.cs" />
     <Compile Include="Helpers\Migrationdataclasses.cs" />
     <Compile Include="Helpers\Transfermanager.cs" />
+    <Compile Include="WindowUI\Annotation\SpotElevationWindow.xaml.cs">
+      <DependentUpon>SpotElevationWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\Audit\Viewauditwindow.xaml.cs">
       <DependentUpon>Viewauditwindow.xaml</DependentUpon>
     </Compile>
@@ -147,7 +150,6 @@
     <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.cs" />
     <Compile Include="WindowUI\Transfer\Migrateelementswindow.cs" />
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
-    <Compile Include="WindowUI\Annotation\Spotelevationwindow.cs" />
     <Compile Include="WindowUI\Annotation\TopographyOffsetsWindow.cs" />
     <Compile Include="WindowUI\Annotation\Topographysectionwindow.cs" />
     <Compile Include="WindowUI\Audit\Dimensionauditreportwindow.cs" />
@@ -184,6 +186,10 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <Page Include="WindowUI\Annotation\SpotElevationWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="WindowUI\Audit\Viewauditwindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>

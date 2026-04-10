@@ -106,86 +106,88 @@ namespace HMVTools
                 var window = new ViewAuditWindow(
                     entries, allViewTypeNames);
 
-                bool? ok = window.ShowDialog();
-                if (ok != true || window.Results == null)
-                    return Result.Cancelled;
-
-                // ── 5. Apply renames ───────────────────────────
-                var toRename = window.Results
-                    .Where(e => e.NameChanged && !e.HasConflict)
-                    .ToList();
-
-                if (toRename.Count == 0)
+                // Send the transaction logic to the window so it executes on click
+                // ── 4. Setup Live Apply Action ─────────────────────────────────
+                // ── 4. Setup Live Apply Action ─────────────────────────────────
+                window.ApplyAction = (modifiedViews) =>
                 {
-                    TaskDialog.Show("HMV Tools",
-                        "No views were renamed.");
-                    return Result.Succeeded;
-                }
+                    // Filter views without conflicts using the original logic
+                    var toRename = modifiedViews.Where(e => !e.HasConflict).ToList();
 
-                int renamed = 0;
-                int skipped = 0;
-                var errors = new List<string>();
-
-                using (Transaction tx = new Transaction(
-                    doc, "HMV - Rename Views"))
-                {
-                    tx.Start();
-
-                    foreach (var entry in toRename)
+                    if (toRename.Count == 0)
                     {
-                        try
-                        {
-                            ElementId id =
-                                new ElementId(entry.ElementId);
-                            View view = doc.GetElement(id) as View;
-                            if (view == null)
-                            {
-                                skipped++;
-                                continue;
-                            }
-
-                            view.Name = entry.NewName;
-                            renamed++;
-                        }
-                        catch (Exception ex)
-                        {
-                            skipped++;
-                            errors.Add(
-                                $"  {entry.OriginalName} -> "
-                                + $"{entry.NewName}: {ex.Message}");
-                        }
+                        TaskDialog.Show("HMV Tools", "No views were renamed (or all had conflicts).");
+                        return;
                     }
 
-                    tx.Commit();
-                }
+                    int renamed = 0;
+                    int skipped = 0;
+                    var errors = new List<string>();
 
-                // ── 6. Summary ─────────────────────────────────
-                int conflicts = window.Results
-                    .Count(e => e.HasConflict);
+                    using (Transaction tx = new Transaction(doc, "HMV - Rename Views"))
+                    {
+                        tx.Start();
 
-                string summary =
-                    $"Renamed: {renamed} view(s)\n"
-                    + $"Skipped (conflict): {conflicts}\n"
-                    + $"Errors: {skipped}";
+                        foreach (var entry in toRename)
+                        {
+                            try
+                            {
+                                ElementId id = new ElementId(entry.ElementId);
+                                View view = doc.GetElement(id) as View;
+                                if (view == null)
+                                {
+                                    skipped++;
+                                    continue;
+                                }
 
-                if (errors.Count > 0)
-                    summary += "\n\nErrors:\n"
-                        + string.Join("\n", errors);
+                                view.Name = entry.NewName;
+                                renamed++;
+                            }
+                            catch (Exception ex)
+                            {
+                                skipped++;
+                                errors.Add($"  {entry.OriginalName} -> {entry.NewName}: {ex.Message}");
+                            }
+                        }
 
-                TaskDialog.Show("HMV Tools - View Audit", summary);
+                        // Force document regeneration to ensure changes sync with the cloud (BIM 360 / ACC)
+                        doc.Regenerate();
+                        tx.Commit();
+                    }
 
+                    // ── 6. Summary ───────────────────────────────────────────────
+                    int conflicts = modifiedViews.Count(e => e.HasConflict);
+
+                    string summary =
+                        $"Renamed views: {renamed}\n"
+                        + $"Skipped (conflicts): {conflicts}\n"
+                        + $"Errors: {skipped}";
+
+                    if (errors.Count > 0)
+                        summary += "\n\nError Details:\n" + string.Join("\n", errors);
+
+                    // Show detailed report to the final user
+                    TaskDialog.Show("HMV Tools - Audit Summary", summary);
+                };
+
+                // ── 5. Set Revit as Parent Window & Show ───────────────────────
+                // This assigns Revit as the owner of the window so it NEVER goes behind it,
+                // but still allows TaskDialogs to appear on top.
+                System.Windows.Interop.WindowInteropHelper helper = new System.Windows.Interop.WindowInteropHelper(window);
+                helper.Owner = commandData.Application.MainWindowHandle;
+
+                window.ShowDialog();
+
+                // ── 6. Safe Exit ───────────────────────────────────────────────
+                // ALWAYS return Succeeded so Revit NEVER rolls back applied transactions.
                 return Result.Succeeded;
-            }
-            catch (Autodesk.Revit.Exceptions
-                .OperationCanceledException)
+
+            } // <-- End of your original try block
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
                 return Result.Cancelled;
             }
-            catch (Exception ex)
-            {
-                TaskDialog.Show("HMV Tools - Error", ex.ToString());
-                return Result.Failed;
-            }
+           
         }
 
         /// <summary>

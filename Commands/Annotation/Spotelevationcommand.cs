@@ -453,9 +453,9 @@ namespace HMVTools
             double dx = xMax - xMin, dy = yMax - yMin;
 
             var samples = new List<XYZ>();
-            for (int ix = 0; ix < 7; ix++)
-                for (int iy = 0; iy < 7; iy++)
-                    samples.Add(new XYZ(xMin + dx * (0.05 + 0.9 * ix / 6.0), yMin + dy * (0.05 + 0.9 * iy / 6.0), 0));
+            for (int ix = 0; ix < 11; ix++)
+                for (int iy = 0; iy < 11; iy++)
+                    samples.Add(new XYZ(xMin + dx * (0.05 + 0.9 * ix / 10.0), yMin + dy * (0.05 + 0.9 * iy / 10.0), 0));
 
             samples.Add(new XYZ(xMin, yMin, 0)); samples.Add(new XYZ(xMax, yMin, 0));
             samples.Add(new XYZ(xMin, yMax, 0)); samples.Add(new XYZ(xMax, yMax, 0));
@@ -547,7 +547,7 @@ namespace HMVTools
             }
 
             // Step 1: Discard noise — groups with < 5% of total ray hits
-            int minVotes = Math.Max(2, (int)(hitData.Count * 0.05));
+            int minVotes = Math.Max(1, (int)(hitData.Count * 0.05));
             var significant = groups.Where(g => g.Value.Count >= minVotes).ToList();
 
             // Fallback: if all groups got filtered, keep the one with most votes
@@ -557,11 +557,11 @@ namespace HMVTools
 
             // Debug: log all groups so we can verify
             foreach (var g in groups.OrderByDescending(g => g.Key))
-                debugInfo.Add($"  NTCE-group: Z={g.Key:F4}ft, votes={g.Value.Count}/{hitData.Count}{(g.Value.Count < minVotes ? " [NOISE]" : "")}");
+                debugInfo.Add($"  NTCE-group: Z={g.Key * 0.3048:F4}m, votes={g.Value.Count}/{hitData.Count}{(g.Value.Count < minVotes ? " [NOISE]" : "")}");
 
             // Step 2: Among significant groups, pick the HIGHEST Z
             var winner = significant.OrderByDescending(g => g.Key).First();
-            debugInfo.Add($"  NTCE-winner: Z={winner.Key:F4}ft, votes={winner.Value.Count}/{hitData.Count}, threshold={minVotes}");
+            debugInfo.Add($"  NTCE-winner: {winner.Key * 0.3048:F4}m, votes={winner.Value.Count}/{hitData.Count}, threshold={minVotes}");
 
             // Return the hit with smallest proximity within the winning group
             return winner.Value.OrderBy(rwc => rwc.Proximity).First();

@@ -1,0 +1,115 @@
+<Window x:Class="HMVTools.SpotElevationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - Spot Elevation"
+        Height="680" Width="550"
+        WindowStyle="None" AllowsTransparency="True"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="Transparent"
+        FontFamily="Roboto,Arial, Segoe UI"
+        >
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="70"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White" Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" | Spot Elevation on Linked Floors and Top Point of Element" Foreground="White" FontSize="10" Margin="5,2,0,0"/>
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="✕" Width="40" Background="Transparent" Foreground="#3C3C3C" BorderThickness="0" FontSize="14" Cursor="Hand" Click="BtnClose_Click"/>
+            </Grid>
+
+            <StackPanel Grid.Row="1" Margin="20,20,20,10">
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="Foundation source:" FontSize="10" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <Border x:Name="brdSearchFoundation" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" Margin="0,0,0,4">
+                        <TextBox x:Name="txtSearchFoundation" Height="26" FontSize="10" BorderThickness="0" Background="Transparent" Padding="8,0" VerticalContentAlignment="Center" Foreground="#787882" Text="Search..." GotFocus="SearchBox_GotFocus" LostFocus="SearchBox_LostFocus" TextChanged="SearchFoundation_TextChanged"/>
+                    </Border>
+                    <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
+                        <ComboBox x:Name="cmbFoundationSource" Height="30" FontSize="10" BorderThickness="0" Background="Transparent" Padding="4,0" VerticalContentAlignment="Center"/>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,15">
+                    <TextBlock Text="Floor link (where floors live):" FontSize="10" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <Border x:Name="brdSearchFloor" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" Margin="0,0,0,4">
+                        <TextBox x:Name="txtSearchFloor" Height="26" FontSize="10" BorderThickness="0" Background="Transparent" Padding="8,0" VerticalContentAlignment="Center" Foreground="#787882" Text="Search..." GotFocus="SearchBox_GotFocus" LostFocus="SearchBox_LostFocus" TextChanged="SearchFloor_TextChanged"/>
+                    </Border>
+                    <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
+                        <ComboBox x:Name="cmbFloorLink" Height="30" FontSize="10" BorderThickness="0" Background="Transparent" Padding="4,0" VerticalContentAlignment="Center"/>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Margin="0,0,0,20">
+                    <TextBlock Text="3D View context for raycasting (MUST have the files visible in 3D view)" FontSize="10" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <Border x:Name="brdSearchView" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" Margin="0,0,0,4">
+                        <TextBox x:Name="txtSearchView" Height="26" FontSize="11" BorderThickness="0" Background="Transparent" Padding="8,0" VerticalContentAlignment="Center" Foreground="#787882" Text="Search..." GotFocus="SearchBox_GotFocus" LostFocus="SearchBox_LostFocus" TextChanged="SearchView_TextChanged"/>
+                    </Border>
+                    <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
+                        <ComboBox x:Name="cmbView3D" Height="30" FontSize="10" BorderThickness="0" Background="Transparent" Padding="4,0" VerticalContentAlignment="Center"/>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                    <TextBlock Text="Leader offset (mm):" FontSize="10" VerticalAlignment="Center" Foreground="#1E1E1E" Margin="0,0,10,0"/>
+                    <Border x:Name="brdLeaderOffset" Width="80" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
+                        <TextBox x:Name="txtLeaderOffset" Text="500" Height="26" FontSize="10" VerticalContentAlignment="Center" HorizontalContentAlignment="Center" BorderThickness="0" Background="Transparent" PreviewTextInput="NumericOnly" GotFocus="TxtLeader_GotFocus" LostFocus="TxtLeader_LostFocus"/>
+                    </Border>
+                    <CheckBox x:Name="chkOffsetX" Content="X" IsChecked="True" FontSize="10" VerticalAlignment="Center" Foreground="#1E1E1E" Margin="15,0,0,0"/>
+                    <CheckBox x:Name="chkOffsetY" Content="Y" IsChecked="False" FontSize="10" VerticalAlignment="Center" Foreground="#1E1E1E" Margin="10,0,0,0"/>
+                    <CheckBox x:Name="chkGrid" Content="Grid?" IsChecked="False" FontSize="10" VerticalAlignment="Center" Foreground="#1E1E1E" Margin="15,0,0,0"/>
+                    <CheckBox x:Name="chkShoulder" Content="Shoulder?" IsChecked="True" FontSize="10" VerticalAlignment="Center" Foreground="#1E1E1E" Margin="15,0,0,0"/>
+                </StackPanel>
+
+                <Border CornerRadius="6" BorderBrush="#0078D4" BorderThickness="1" Background="#004982" Padding="12,10" Margin="0,0,0,15">
+                    <StackPanel>
+                        <CheckBox x:Name="chkHmvStandard" Content="HMV Standard (NTCE / NAP)" FontSize="10" FontWeight="Bold" Foreground="White" IsChecked="False"/>
+                        <TextBlock Text="Places two spot elevations per element:&#x0a;  • N.T.C.E. → top of selected element&#x0a;  • N.A.P.   → intersection with linked floor" FontSize="8" Foreground="White" TextWrapping="Wrap" Margin="20,4,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="After clicking OK you will pick elements in the canvas.&#x0a;A vertical ray finds the floor face in the chosen link." FontSize="8" Foreground="#787882" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,20,0">
+                <Button Content="Cancel" FontSize="10" Height="30" Width="150" Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0" Cursor="Hand" Margin="0,0,10,0" Click="BtnCancel_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+
+                <Button Content="OK – Pick Elements" FontSize="10" FontWeight="Bold" Height="30" Width="150" Background="#E9AA00" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnOk_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+
+        </Grid>
+    </Border>
+</Window>

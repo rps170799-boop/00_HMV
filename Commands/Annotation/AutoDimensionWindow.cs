@@ -74,8 +74,14 @@ namespace HMVTools
                             {
                                 if (face is PlanarFace pf)
                                 {
-                                    // Skip horizontal faces (Floor/Ceiling limits of the wall)
+                                    // 1. Skip horizontal faces (Floor/Ceiling limits of the wall)
                                     if (Math.Abs(pf.FaceNormal.Z) > 0.01) continue;
+
+                                    // --- NEW FIX 1: PERPENDICULAR CHECK ---
+                                    // The dimension line MUST be perpendicular to the face. 
+                                    // If the dot product of the face normal and the line direction is ~1, they are perpendicular.
+                                    double dotProduct = Math.Abs(pf.FaceNormal.DotProduct(selectedLine.Direction));
+                                    if (dotProduct < 0.99) continue; // Skips walls running parallel to the line or at weird angles
 
                                     IntersectionResultArray results;
                                     SetComparisonResult intersectResult = pf.Intersect(unboundLine, out results);
@@ -89,8 +95,14 @@ namespace HMVTools
                                         double param = selectedLine.Project(pt).Parameter;
                                         if (param >= 0 && param <= 1)
                                         {
-                                            double dist = pt.DistanceTo(selectedLine.GetEndPoint(0));
-                                            intersectionPoints.Add(new Tuple<Reference, XYZ, double>(pf.Reference, pt, dist));
+                                            // --- NEW FIX 2: PREVENT DUPLICATES ---
+                                            // If walls are joined, they might yield overlapping faces at the exact same coordinate.
+                                            // Check if we already registered an intersection at this exact point before adding it.
+                                            if (!intersectionPoints.Any(x => x.Item2.IsAlmostEqualTo(pt)))
+                                            {
+                                                double dist = pt.DistanceTo(selectedLine.GetEndPoint(0));
+                                                intersectionPoints.Add(new Tuple<Reference, XYZ, double>(pf.Reference, pt, dist));
+                                            }
                                         }
                                     }
                                 }
@@ -220,6 +232,7 @@ namespace HMVTools
             }
         }
     }
+
 
     // Custom Selection Filter to restrict the PickObject solely to Lines
     public class LineSelectionFilter : ISelectionFilter
