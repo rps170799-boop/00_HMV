@@ -1,0 +1,64 @@
+<Window x:Class="HMVTools.Dwg3DProgressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - Converting..."
+        Height="250" Width="450"
+        WindowStyle="None" AllowsTransparency="True"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="Transparent"
+        FontFamily="Roboto, Arial, Segoe UI"
+        Topmost="True">
+
+    <Border Background="#F5F5F8" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White" Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" - Proccesing . . ." Foreground="White" FontSize="10" Margin="5,2,0,0"/>
+                </StackPanel>
+            </Grid>
+
+            <StackPanel Grid.Row="1" Margin="25,20,25,20">
+
+                <TextBlock x:Name="txtPhase" Text="Initializing..." FontSize="12" FontWeight="Bold" Foreground="#004982" Margin="0,0,0,8"/>
+                <TextBlock x:Name="txtDetail" Text="Please wait while the elements are processed." FontSize="10" Foreground="#3C3C3C" TextTrimming="CharacterEllipsis" Margin="0,0,0,20"/>
+
+                <ProgressBar x:Name="progressBar" Height="12" BorderThickness="0" Background="#E0E0E5" Foreground="#E9AA00" Margin="0,0,0,10">
+                    <ProgressBar.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </ProgressBar.Resources>
+                </ProgressBar>
+
+                <TextBlock x:Name="txtStats" Text="0 / 0 (0%) — Elapsed: 0s" FontSize="11" Foreground="#787882" HorizontalAlignment="Right" Margin="0,0,0,25"/>
+
+                <Button x:Name="btnCancel" Content="Cancel Process" FontSize="10" Height="32" Width="150" Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0" Cursor="Hand" HorizontalAlignment="Center" Click="BtnCancel_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

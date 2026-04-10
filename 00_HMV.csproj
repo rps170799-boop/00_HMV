@@ -147,6 +147,12 @@
     <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.xaml.cs">
       <DependentUpon>Gridlevelextentwindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="WindowUI\DWG\Dwg3DToShapeWindow.xaml.cs">
+      <DependentUpon>Dwg3DToShapeWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\DWG\Dwg3DProgressWindow.xaml.cs">
+      <DependentUpon>Dwg3DProgressWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.cs" />
     <Compile Include="WindowUI\Transfer\Migrateelementswindow.cs" />
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
@@ -158,8 +164,6 @@
     <Compile Include="WindowUI\Audit\LinkedFilesAuditWindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
     <Compile Include="WindowUI\Audit\Textauditconfigwindow.cs" />
-    <Compile Include="WindowUI\DWG\Dwg3dprogresswindow.cs" />
-    <Compile Include="WindowUI\DWG\Dwg3dtoshapewindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
     <Compile Include="WindowUI\DWG\DwgPickerWindow.cs" />
     <Compile Include="Commands\Annotation\Gridlevelextentcommand.cs" />
@@ -204,6 +208,14 @@
     </Page>
     <Page Include="WindowUI\Annotation\Gridlevelextentwindow.xaml">
       <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="WindowUI\DWG\Dwg3DToShapeWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\DWG\Dwg3DProgressWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
     </Page>
   </ItemGroup>
   <ItemGroup>
