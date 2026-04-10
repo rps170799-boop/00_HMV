@@ -42,6 +42,8 @@ namespace HMVTools
             Document doc = uidoc.Document;
             View view = doc.ActiveView;
 
+
+
             if (!(view is ViewPlan))
             {
                 TaskDialog.Show("HMV Tools", "This command only works in plan views.");
@@ -189,10 +191,7 @@ namespace HMVTools
                 new ElementCategoryFilter(BuiltInCategory.OST_Floors),
                 FindReferenceTarget.Face, view3d);
             floorRI.FindReferencesInRevitLinks = true;
-            var topoRI = new ReferenceIntersector(
-                new ElementCategoryFilter(BuiltInCategory.OST_Topography),
-                FindReferenceTarget.All, view3d);
-            floorRI.FindReferencesInRevitLinks = true;
+           
 
             ReferenceIntersector elemRI = null;
             if (hmvStandard)
@@ -213,6 +212,8 @@ namespace HMVTools
 
             // ── Process ─────────────────────────────────────────
             int placedNap = 0, placedNtce = 0, placedGrids = 0;
+            int placedNapText = 0;
+            ElementId topoNapTextTypeId = ElementId.InvalidElementId;
             var skipped = new List<string>();
             var debugInfo = new List<string>();
 
@@ -239,23 +240,33 @@ namespace HMVTools
                     var napHit = FindFirstHitOnLink(floorHits, floorLink.Id);
 
 
+
+
+                    XYZ topoTextPoint = null;
                     if (napHit == null)
+                        topoTextPoint = FindTopoMeshHit(floorLink, hostCenter.X, hostCenter.Y, debugInfo);
+
+                    if (napHit == null && topoTextPoint == null)
                     {
-                        var topoHits = topoRI.Find(rayOrigin, XYZ.BasisZ.Negate());
-                        napHit = FindFirstHitOnLink(topoHits, floorLink.Id);
-                        debugInfo.Add($"  NAP topo fallback: hits={topoHits?.Count ?? 0}, matched={napHit != null}");
-                    }
-
-
-
-                    if (napHit == null)
-                    {
-                        skipped.Add($"{fd.Name} → No floor face hit");
+                        skipped.Add($"{fd.Name} → No floor or topo hit");
                         continue;
                     }
 
-                    Reference napRef = napHit.GetReference();
-                    XYZ napPoint = napRef.GlobalPoint ?? new XYZ(hostCenter.X, hostCenter.Y, rayOrigin.Z - napHit.Proximity);
+                    Reference napRef;
+                    XYZ napPoint;
+                    bool isTopoText;
+                    if (napHit != null)
+                    {
+                        napRef = napHit.GetReference();
+                        napPoint = napRef.GlobalPoint ?? new XYZ(hostCenter.X, hostCenter.Y, rayOrigin.Z - napHit.Proximity);
+                        isTopoText = false;
+                    }
+                    else
+                    {
+                        napRef = null;
+                        napPoint = topoTextPoint;
+                        isTopoText = true;
+                    }
 
                     if (hmvStandard)
                     {
@@ -320,11 +331,31 @@ namespace HMVTools
 
                             try
                             {
-                                SpotDimension spotNap = doc.Create.NewSpotElevation(view, napRef, napPoint, napBend, napEnd, napPoint, true);
-                                if (spotNap != null)
+                                if (isTopoText)
                                 {
-                                    pair.Nap = spotNap; napSpots.Add(spotNap); placedNap++;
-                                    if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, napEnd));
+                                    if (topoNapTextTypeId == ElementId.InvalidElementId)
+                                        topoNapTextTypeId = FindOrCreateTopoNapTextType(doc, "HMV_General_2mm Arial");
+
+                                    if (topoNapTextTypeId != ElementId.InvalidElementId)
+                                    {
+                                        string txt = FormatNapText(doc, napPoint);
+                                        TextNote tn = TextNote.Create(doc, view.Id, napEnd, txt, topoNapTextTypeId);
+                                        if (tn != null)
+                                        {
+                                            placedNap++;
+                                            placedNapText++;
+                                            if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, napEnd));
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    SpotDimension spotNap = doc.Create.NewSpotElevation(view, napRef, napPoint, napBend, napEnd, napPoint, true);
+                                    if (spotNap != null)
+                                    {
+                                        pair.Nap = spotNap; napSpots.Add(spotNap); placedNap++;
+                                        if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, napEnd));
+                                    }
                                 }
                             }
                             catch (Exception ex) { skipped.Add($"{fd.Name} → NAP: {ex.Message}"); }
@@ -354,13 +385,33 @@ namespace HMVTools
 
                         try
                         {
-                            SpotDimension spot = doc.Create.NewSpotElevation(view, napRef, napPoint, bend, end, napPoint, true);
-                            if (spot != null)
+                            if (isTopoText)
                             {
-                                placedNap++;
-                                if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, end));
+                                if (topoNapTextTypeId == ElementId.InvalidElementId)
+                                    topoNapTextTypeId = FindOrCreateTopoNapTextType(doc, "HMV_General_2mm Arial");
+
+                                if (topoNapTextTypeId != ElementId.InvalidElementId)
+                                {
+                                    string txt = FormatNapText(doc, napPoint);
+                                    TextNote tn = TextNote.Create(doc, view.Id, end, txt, topoNapTextTypeId);
+                                    if (tn != null)
+                                    {
+                                        placedNap++;
+                                        placedNapText++;
+                                        if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, end));
+                                    }
+                                }
                             }
-                            else skipped.Add($"{fd.Name} → null");
+                            else
+                            {
+                                SpotDimension spot = doc.Create.NewSpotElevation(view, napRef, napPoint, bend, end, napPoint, true);
+                                if (spot != null)
+                                {
+                                    placedNap++;
+                                    if (createGrid) gridLineData.Add(new KeyValuePair<XYZ, XYZ>(napPoint, end));
+                                }
+                                else skipped.Add($"{fd.Name} → null");
+                            }
                         }
                         catch (Exception ex) { skipped.Add($"{fd.Name} → {ex.Message}"); }
                     }
@@ -439,8 +490,8 @@ namespace HMVTools
             // Report
             string report = "SPOT ELEVATION SUMMARY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 + $"Elements picked: {foundations.Count}\n";
-            if (hmvStandard) report += $"NTCE placed: {placedNtce}\nNAP placed: {placedNap}\n";
-            else report += $"Spot elevations placed: {placedNap}\n";
+            if (hmvStandard) report += $"NTCE placed: {placedNtce}\nNAP placed: {placedNap}" + (placedNapText > 0 ? $" ({placedNapText} as text on topo)" : "") + "\n";
+            else report += $"Spot elevations placed: {placedNap}" + (placedNapText > 0 ? $" ({placedNapText} as text on topo)" : "") + "\n";
             if (createGrid) report += $"Grids created: {placedGrids}\n";
             report += $"Skipped: {skipped.Count}\n";
 
@@ -580,6 +631,95 @@ namespace HMVTools
 
             // Return the hit with smallest proximity within the winning group
             return winner.Value.OrderBy(rwc => rwc.Proximity).First();
+        }
+
+        private XYZ FindTopoMeshHit(RevitLinkInstance link, double xHost, double yHost, List<string> debugInfo)
+        {
+            Document linkDoc = link?.GetLinkDocument();
+            if (linkDoc == null) return null;
+
+            Transform linkT = link.GetTotalTransform();
+            Transform invT = linkT.Inverse;
+            XYZ probeLocal = invT.OfPoint(new XYZ(xHost, yHost, 0));
+            double xL = probeLocal.X, yL = probeLocal.Y;
+
+            var collector = new FilteredElementCollector(linkDoc)
+                .OfCategory(BuiltInCategory.OST_Topography)
+                .WhereElementIsNotElementType();
+
+            var opt = new Options();
+            double bestZLocal = double.NegativeInfinity;
+            int triCount = 0, hitCount = 0;
+            bool found = false;
+
+            foreach (Element topo in collector)
+            {
+                GeometryElement geom = topo.get_Geometry(opt);
+                if (geom == null) continue;
+                foreach (GeometryObject gObj in geom)
+                {
+                    if (!(gObj is Mesh mesh)) continue;
+                    for (int i = 0; i < mesh.NumTriangles; i++)
+                    {
+                        triCount++;
+                        MeshTriangle tri = mesh.get_Triangle(i);
+                        XYZ v0 = tri.get_Vertex(0);
+                        XYZ v1 = tri.get_Vertex(1);
+                        XYZ v2 = tri.get_Vertex(2);
+
+                        double denom = (v1.Y - v2.Y) * (v0.X - v2.X) + (v2.X - v1.X) * (v0.Y - v2.Y);
+                        if (Math.Abs(denom) < 1e-12) continue;
+                        double a = ((v1.Y - v2.Y) * (xL - v2.X) + (v2.X - v1.X) * (yL - v2.Y)) / denom;
+                        double b = ((v2.Y - v0.Y) * (xL - v2.X) + (v0.X - v2.X) * (yL - v2.Y)) / denom;
+                        double c = 1.0 - a - b;
+
+                        if (a < -1e-9 || b < -1e-9 || c < -1e-9) continue;
+                        hitCount++;
+
+                        double zHit = a * v0.Z + b * v1.Z + c * v2.Z;
+                        if (zHit > bestZLocal) { bestZLocal = zHit; found = true; }
+                    }
+                }
+            }
+
+            debugInfo?.Add($"  topo mesh: tris={triCount}, in-XY={hitCount}, found={found}");
+            if (!found) return null;
+
+            return linkT.OfPoint(new XYZ(xL, yL, bestZLocal));
+        }
+
+        private ElementId FindOrCreateTopoNapTextType(Document doc, string typeName)
+        {
+            var existing = new FilteredElementCollector(doc)
+                .OfClass(typeof(TextNoteType))
+                .Cast<TextNoteType>()
+                .FirstOrDefault(t => t.Name.Equals(typeName, StringComparison.OrdinalIgnoreCase));
+            if (existing != null) return existing.Id;
+
+            var baseType = new FilteredElementCollector(doc)
+                .OfClass(typeof(TextNoteType))
+                .Cast<TextNoteType>()
+                .FirstOrDefault();
+            if (baseType == null) return ElementId.InvalidElementId;
+
+            try
+            {
+                TextNoteType nt = baseType.Duplicate(typeName) as TextNoteType;
+                if (nt == null) return ElementId.InvalidElementId;
+                TrySet(nt, BuiltInParameter.TEXT_SIZE, 2.0 * MmToFeet);
+                TrySet(nt, BuiltInParameter.TEXT_FONT, "Arial");
+                TrySet(nt, BuiltInParameter.TEXT_BACKGROUND, 0);
+                return nt.Id;
+            }
+            catch { return ElementId.InvalidElementId; }
+        }
+
+        private string FormatNapText(Document doc, XYZ hostPoint)
+        {
+            Transform internalToSurvey = doc.ActiveProjectLocation.GetTransform().Inverse;
+            XYZ survey = internalToSurvey.OfPoint(hostPoint);
+            double zMeters = UnitUtils.ConvertFromInternalUnits(survey.Z, UnitTypeId.Meters);
+            return "N.A.P. " + zMeters.ToString("0.00000", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private ReferenceWithContext FindFirstHitOnLink(IList<ReferenceWithContext> hits, ElementId linkId)
