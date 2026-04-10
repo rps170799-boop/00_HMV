@@ -94,6 +94,9 @@ namespace HMVTools
 
         private void FilterCombo(ComboBox combo, List<string> allItems, string filterText)
         {
+
+
+            if (combo == null || allItems == null) return;
             string selected = combo.SelectedItem as string;
             string filter = (filterText == "Search...") ? "" : filterText;
 

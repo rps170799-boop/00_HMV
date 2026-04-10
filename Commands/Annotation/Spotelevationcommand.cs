@@ -47,6 +47,7 @@ namespace HMVTools
                 TaskDialog.Show("HMV Tools", "This command only works in plan views.");
                 return Result.Cancelled;
             }
+         
 
             // ── Collect Links ───────────────────────────────────
             var linkInstances = new FilteredElementCollector(doc)
@@ -188,6 +189,10 @@ namespace HMVTools
                 new ElementCategoryFilter(BuiltInCategory.OST_Floors),
                 FindReferenceTarget.Face, view3d);
             floorRI.FindReferencesInRevitLinks = true;
+            var topoRI = new ReferenceIntersector(
+                new ElementCategoryFilter(BuiltInCategory.OST_Topography),
+                FindReferenceTarget.All, view3d);
+            floorRI.FindReferencesInRevitLinks = true;
 
             ReferenceIntersector elemRI = null;
             if (hmvStandard)
@@ -232,6 +237,16 @@ namespace HMVTools
                     XYZ rayOrigin = new XYZ(hostCenter.X, hostCenter.Y, hostCenter.Z + 200);
                     var floorHits = floorRI.Find(rayOrigin, XYZ.BasisZ.Negate());
                     var napHit = FindFirstHitOnLink(floorHits, floorLink.Id);
+
+
+                    if (napHit == null)
+                    {
+                        var topoHits = topoRI.Find(rayOrigin, XYZ.BasisZ.Negate());
+                        napHit = FindFirstHitOnLink(topoHits, floorLink.Id);
+                        debugInfo.Add($"  NAP topo fallback: hits={topoHits?.Count ?? 0}, matched={napHit != null}");
+                    }
+
+
 
                     if (napHit == null)
                     {
