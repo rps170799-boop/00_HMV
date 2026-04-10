@@ -149,7 +149,7 @@
                             </StackPanel>
 
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="Decimation (1=No)" FontSize="10"
+                                <TextBlock Text="Decimation (1=100%, 2=50%)" FontSize="10"
                                            Foreground="White" Margin="0,0,0,4"/>
                                 <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
                                     <TextBox x:Name="txtDecimate" Text="1" Height="26" FontSize="10"

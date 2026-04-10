@@ -154,7 +154,9 @@
       <DependentUpon>Dwg3DProgressWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.cs" />
-    <Compile Include="WindowUI\Transfer\Migrateelementswindow.cs" />
+    <Compile Include="WindowUI\Transfer\Migrateelementswindow.xaml.cs">
+      <DependentUpon>Migrateelementswindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\Annotation\SpotAlignmentWindow.cs" />
     <Compile Include="WindowUI\Annotation\TopographyOffsetsWindow.cs" />
     <Compile Include="WindowUI\Annotation\Topographysectionwindow.cs" />
@@ -214,6 +216,10 @@
       <SubType>Designer</SubType>
     </Page>
     <Page Include="WindowUI\DWG\Dwg3DProgressWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\Transfer\Migrateelementswindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>

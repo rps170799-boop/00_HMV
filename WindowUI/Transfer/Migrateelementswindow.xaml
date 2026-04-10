@@ -1,0 +1,150 @@
+<Window x:Class="HMVTools.MigrateElementsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - Migrate Elements"
+        Height="700" Width="600"
+        WindowStyle="None" AllowsTransparency="True"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="Transparent"
+        FontFamily="Roboto, Arial, Segoe UI">
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="70"/>
+            </Grid.RowDefinitions>
+
+            <!-- ══ Title bar ══ -->
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White" Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" | Migrate View Elements" Foreground="White" FontSize="10" Margin="5,2,0,0"/>
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="✕" Width="40"
+                        Background="Transparent" Foreground="#3C3C3C"
+                        BorderThickness="0" FontSize="14" Cursor="Hand"
+                        Click="BtnClose_Click"/>
+            </Grid>
+
+            <!-- ══ Body ══ -->
+            <Grid Grid.Row="1" Margin="20,14,20,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <!-- 0: source info -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- 1: target doc label+combo -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- 2: views label -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- 3: search box -->
+                    <RowDefinition Height="*"/>
+                    <!-- 4: view list -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- 5: options -->
+                    <RowDefinition Height="Auto"/>
+                    <!-- 6: status -->
+                </Grid.RowDefinitions>
+
+                <!-- 0: Source info accent bar -->
+                <Border Grid.Row="0" CornerRadius="6" Background="#E8F3FF"
+                        BorderBrush="#0078D4" BorderThickness="1"
+                        Padding="12,8" Margin="0,0,0,14">
+                    <TextBlock x:Name="txtSourceInfo" FontSize="11"
+                               Foreground="#004982"/>
+                </Border>
+
+                <!-- 1: Target document -->
+                <StackPanel Grid.Row="1" Margin="0,0,0,12">
+                    <TextBlock Text="Target Document:" FontSize="11" FontWeight="SemiBold"
+                               Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
+                        <ComboBox x:Name="targetDocCombo" Height="30" FontSize="11"
+                                  BorderThickness="0" Background="Transparent"
+                                  Padding="8,0" VerticalContentAlignment="Center"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- 2: Views label -->
+                <TextBlock Grid.Row="2" Text="Views to Transfer:" FontSize="11"
+                           FontWeight="SemiBold" Foreground="#1E1E1E"
+                           Margin="0,0,0,4"/>
+
+                <!-- 3: Search box -->
+                <Border Grid.Row="3" CornerRadius="6" BorderBrush="#C8C8D2"
+                        BorderThickness="1" Background="White" Margin="0,0,0,6">
+                    <TextBox x:Name="viewSearchBox" Height="26" FontSize="11"
+                             BorderThickness="0" Background="Transparent"
+                             Padding="8,4" VerticalContentAlignment="Center"
+                             TextChanged="ViewSearchBox_TextChanged"/>
+                </Border>
+
+                <!-- 4: View list (scrollable) -->
+                <Border Grid.Row="4" CornerRadius="6" BorderBrush="#C8C8D2"
+                        BorderThickness="1" Background="White" Margin="0,0,0,12">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="viewListPanel" Margin="6"/>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- 5: Options -->
+                <StackPanel Grid.Row="5" Margin="0,0,0,6">
+                    <CheckBox x:Name="chkAnnotations"
+                              Content="Include view-specific annotations (2-step copy)"
+                              IsChecked="True" FontSize="11" FontWeight="SemiBold"
+                              Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <CheckBox x:Name="chkRefMarkers"
+                              Content="Identify reference markers for manual recreation"
+                              IsChecked="True" FontSize="11" FontWeight="SemiBold"
+                              Foreground="#1E1E1E"/>
+                </StackPanel>
+
+                <!-- 6: Status line -->
+                <TextBlock Grid.Row="6" x:Name="statusText" FontSize="10"
+                           Foreground="#787882" Margin="0,6,0,0"/>
+            </Grid>
+
+            <!-- ══ Footer buttons ══ -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                        VerticalAlignment="Center" Margin="0,0,20,0">
+                <!-- Cancel: grey. If you want blue instead, swap Background to #0078D4 and Foreground to White. -->
+                <Button Content="Cancel" FontSize="10" Height="30" Width="150"
+                        Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0"
+                        Cursor="Hand" Margin="0,0,10,0" Click="BtnCancel_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+
+                <!-- Migrate: primary yellow -->
+                <Button Content="Migrate" FontSize="10" FontWeight="Bold"
+                        Height="30" Width="150" Background="#E9AA00" Foreground="White"
+                        BorderThickness="0" Cursor="Hand" Click="BtnMigrate_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+
+        </Grid>
+    </Border>
+</Window>
