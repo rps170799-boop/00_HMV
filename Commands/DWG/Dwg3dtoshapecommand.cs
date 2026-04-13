@@ -1,10 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.IO;
-using Autodesk.Revit.Attributes;
+﻿using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using DocumentFormat.OpenXml.Drawing;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using IOPath = System.IO.Path;
+using System.Linq;
 
 namespace HMVTools
 {
@@ -364,7 +366,7 @@ namespace HMVTools
                             commandData.Application.Application,
                             doc, geoList, insertionPoint,
                             selectedBic, dsName,
-                            win.Mode, win.CreateReferencePlanes,
+                            win.Mode, win.CreateReferencePlanes, win.CreateCoarseCube,
                             importId, sourceDs?.Id, deleteOriginal,
                             prog);
                         prog.Close();
@@ -590,6 +592,7 @@ namespace HMVTools
             string shapeName,
             Dwg3DOutputMode mode,
             bool createRefPlanes,
+            bool createCoarseCube,
             ElementId originalImportId,
             ElementId sourceDsId,
             bool deleteOriginal,
@@ -600,6 +603,8 @@ namespace HMVTools
             prog.SetIndeterminate();
 
             string templatePath = ResolveGenericModelTemplate(app);
+            prog.UpdateDetail("Template resolved to: " + (templatePath ?? "<null>"));
+            System.IO.Directory.GetFiles(app.FamilyTemplatePath, "Generic Model*.rft", System.IO.SearchOption.AllDirectories);
             if (templatePath == null)
             {
                 prog.Close();
@@ -609,10 +614,12 @@ namespace HMVTools
                 return;
             }
 
-            // ── Phase 3b: Translate geometry to family-local coords ──
-            prog.UpdatePhase("Phase 4/6 — Translating geometry to family origin...");
+            // In-place replacement: the family's origin sits at the DWG's
+            // LocationPoint, so placing the family instance back at that
+            // same point puts geometry exactly where the DWG was.
             XYZ offset = -insertionPoint;
             Transform tx = Transform.CreateTranslation(offset);
+           
 
             List<GeometryObject> localGeo = new List<GeometryObject>();
             int translateFailed = 0;
@@ -707,16 +714,19 @@ namespace HMVTools
                     if (createRefPlanes)
                         CreateBoundingBoxReferencePlanes(famDoc, localGeo, prog);
 
+                    if (createCoarseCube)
+                        CreateCoarseVisibilityCube(famDoc, localGeo, prog);
+
                     ftx.Commit();
                 }
 
                 // ── Phase 3d: Save family to temp ──
-                string tempDir = Path.Combine(Path.GetTempPath(), "HMVTools");
+                string tempDir = IOPath.Combine(IOPath.GetTempPath(), "HMVTools");
                 Directory.CreateDirectory(tempDir);
                 string safeName = shapeName;
-                foreach (char c in Path.GetInvalidFileNameChars())
+                foreach (char c in IOPath.GetInvalidFileNameChars())
                     safeName = safeName.Replace(c, '_');
-                tempRfa = Path.Combine(tempDir,
+                tempRfa = IOPath.Combine(tempDir,
                     $"{safeName}_{DateTime.Now:yyyyMMdd_HHmmss}.rfa");
 
                 SaveAsOptions sao = new SaveAsOptions { OverwriteExistingFile = true };
@@ -798,7 +808,7 @@ namespace HMVTools
 
                 // Look up the loaded family by name. The filename (minus .rfa)
                 // is the family's name in the project after loading.
-                string expectedName = Path.GetFileNameWithoutExtension(tempRfa);
+                string expectedName = IOPath.GetFileNameWithoutExtension(tempRfa);
                 loadedFamily = new FilteredElementCollector(projectDoc)
                     .OfClass(typeof(Family))
                     .Cast<Family>()
@@ -851,6 +861,7 @@ namespace HMVTools
                     FamilyInstance inst = projectDoc.Create.NewFamilyInstance(
                         insertionPoint, symbol,
                         Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                    
 
                     if (deleteOriginal)
                     {
@@ -870,13 +881,14 @@ namespace HMVTools
                     $"Family created and placed.\n\n" +
                     $"Family name:       {shapeName}\n" +
                     $"Type name:         {shapeName}01\n" +
-                    $"Template used:     {Path.GetFileName(templatePath)}\n" +
+                    $"Template used:     {templatePath}\n" +
                     $"Category fallback: {(categoryFellBack ? "Yes (Generic Model)" : "No")}\n" +
                     $"Geometry added:    {famGeoAdded}\n" +
                     $"Geometry rejected: {famGeoRejected}\n" +
                     $"Translate failed:  {translateFailed}\n" +
                     $"Old instances removed: {removedOldInstances}\n" +
                     $"Reference planes:  {(createRefPlanes ? "Created" : "Skipped")}\n" +
+                    $"Coarse cube:       {(createCoarseCube ? "Created" : "Skipped")}\n" +
                     $"Insertion point:   ({insertionPoint.X:F2}, {insertionPoint.Y:F2}, {insertionPoint.Z:F2})\n" +
                     $"Temp .rfa:         {tempRfa}\n" +
                     $"Original deleted:  {(deleteOriginal ? "Yes" : "No")}";
@@ -900,25 +912,40 @@ namespace HMVTools
             if (string.IsNullOrEmpty(tpDir) || !Directory.Exists(tpDir))
                 return null;
 
-            // Try common filenames first (metric + imperial)
+            // Try common filenames first (metric + imperial).
+            // Note: we deliberately avoid "Adaptive" templates — adaptive families
+            // don't support NewExtrusion with a simple XYZ sketch plane and
+            // cause the Coarse cube creation to fail.
             string[] preferred = new[]
             {
                 "Metric Generic Model.rft",
-                "Generic Model.rft",
-                "Metric Generic Model wall based.rft"
+                "Generic Model.rft"
             };
             foreach (string name in preferred)
             {
-                string full = Path.Combine(tpDir, name);
+                string full = IOPath.Combine(tpDir, name);
                 if (File.Exists(full)) return full;
             }
 
-            // Recursive search as fallback
+            // Recursive fallback — but explicitly exclude Adaptive, Pattern,
+            // Conceptual Mass, and Face-Based variants.
             try
             {
-                string[] matches = Directory.GetFiles(tpDir, "*Generic Model*.rft",
-                    SearchOption.AllDirectories);
-                if (matches.Length > 0) return matches[0];
+                string[] matches = Directory.GetFiles(
+                    tpDir, "*Generic Model*.rft", SearchOption.AllDirectories);
+
+                foreach (string m in matches)
+                {
+                    string fname = IOPath.GetFileName(m);
+                    if (fname.IndexOf("Adaptive", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (fname.IndexOf("Pattern", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (fname.IndexOf("Face", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (fname.IndexOf("Mass", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (fname.IndexOf("based", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (fname.IndexOf("Casework", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    if (fname.IndexOf("Curtain", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                    return m;
+                }
             }
             catch { }
 
@@ -1167,7 +1194,138 @@ namespace HMVTools
                 $"Reference planes: {created} created, {failed} failed  " +
                 $"(pad {(pad * 304.8):F0} mm)");
         }
+        // ══════════════════════════════════════════════════════
+        //  Coarse-view annotation cube
+        //
+        //  Creates a solid extrusion that wraps the geometry's
+        //  bounding box (+1 mm padding on each face), visible
+        //  only at Coarse detail level. At Medium and Fine the
+        //  cube disappears and the real geometry is revealed.
+        //
+        //  Purpose: gives BIM coordinators a clean box to
+        //  dimension and tag against in Coarse views, while
+        //  preserving full fidelity in detail views.
+        //
+        //  MUST be called inside an open famDoc transaction.
+        // ══════════════════════════════════════════════════════
+        void CreateCoarseVisibilityCube(
+            Document famDoc,
+            List<GeometryObject> localGeo,
+            Dwg3DProgressWindow prog)
+        {
+            prog.UpdateDetail("Creating Coarse-view annotation cube...");
+
+            // ── Compute bbox from geoList (same pattern as ref planes) ──
+            double minX = double.MaxValue, minY = double.MaxValue, minZ = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue, maxZ = double.MinValue;
+            bool any = false;
+
+            foreach (GeometryObject g in localGeo)
+            {
+                if (g is Solid s && s.Faces.Size > 0)
+                {
+                    try
+                    {
+                        foreach (Edge edge in s.Edges)
+                        {
+                            foreach (XYZ v in edge.Tessellate())
+                            {
+                                if (v.X < minX) minX = v.X; if (v.X > maxX) maxX = v.X;
+                                if (v.Y < minY) minY = v.Y; if (v.Y > maxY) maxY = v.Y;
+                                if (v.Z < minZ) minZ = v.Z; if (v.Z > maxZ) maxZ = v.Z;
+                                any = true;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                else if (g is Mesh m)
+                {
+                    IList<XYZ> verts = m.Vertices;
+                    for (int i = 0; i < verts.Count; i++)
+                    {
+                        XYZ v = verts[i];
+                        if (v.X < minX) minX = v.X; if (v.X > maxX) maxX = v.X;
+                        if (v.Y < minY) minY = v.Y; if (v.Y > maxY) maxY = v.Y;
+                        if (v.Z < minZ) minZ = v.Z; if (v.Z > maxZ) maxZ = v.Z;
+                        any = true;
+                    }
+                }
+            }
+
+            if (!any)
+            {
+                prog.UpdateDetail("No bbox data — skipping Coarse cube.");
+                return;
+            }
+
+            // ── Pad by 5 mm on each face (avoids Z-fighting with real geometry) ──
+            const double CUBE_PAD_FT = 5.0 / 304.8;  // 5 mm in feet
+            minX -= CUBE_PAD_FT; minY -= CUBE_PAD_FT; minZ -= CUBE_PAD_FT;
+            maxX += CUBE_PAD_FT; maxY += CUBE_PAD_FT; maxZ += CUBE_PAD_FT;
+
+            try
+            {
+                // ── Build a rectangle profile on the XY plane at Z=minZ ──
+                XYZ p0 = new XYZ(minX, minY, minZ);
+                XYZ p1 = new XYZ(maxX, minY, minZ);
+                XYZ p2 = new XYZ(maxX, maxY, minZ);
+                XYZ p3 = new XYZ(minX, maxY, minZ);
+
+                CurveArray rect = new CurveArray();
+                rect.Append(Line.CreateBound(p0, p1));
+                rect.Append(Line.CreateBound(p1, p2));
+                rect.Append(Line.CreateBound(p2, p3));
+                rect.Append(Line.CreateBound(p3, p0));
+
+                CurveArrArray profile = new CurveArrArray();
+                profile.Append(rect);
+
+                // ── Sketch plane on the base (Z=minZ), normal = +Z ──
+                Plane basePlane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, p0);
+                SketchPlane sketchPlane = SketchPlane.Create(famDoc, basePlane);
+
+                // ── Extrude from 0 to (maxZ-minZ) along the plane's +Z normal ──
+                double height = maxZ - minZ;
+                Extrusion cube = famDoc.FamilyCreate.NewExtrusion(
+                    true,            // isSolid
+                    profile,
+                    sketchPlane,
+                    height);
+
+                if (cube == null)
+                {
+                    prog.UpdateDetail("Coarse cube: NewExtrusion returned null.");
+                    return;
+                }
+
+                try { cube.Name = "HMV_CoarseCube"; } catch { }
+
+                // ── Visibility: visible only at Coarse ──
+                // FamilyElementVisibility constructor takes a FamilyElementVisibilityType:
+                //   Model = visible in 3D + all 2D view orientations.
+                // Then we toggle the detail-level flags.
+                FamilyElementVisibility vis = new FamilyElementVisibility(
+                    FamilyElementVisibilityType.Model);
+                vis.IsShownInCoarse = true;
+                vis.IsShownInMedium = false;
+                vis.IsShownInFine = false;
+
+                
+                cube.SetVisibility(vis);
+
+                prog.UpdateDetail(
+                    $"Coarse cube: created  (pad 1 mm, height " +
+                    $"{(height * 304.8):F0} mm)");
+            }
+            catch (Exception ex)
+            {
+                prog.UpdateDetail("Coarse cube failed: " + ex.Message);
+            }
+        }
     }
+
+
 
     // ── Plain data classes ──
     public class Dwg3DImportItem

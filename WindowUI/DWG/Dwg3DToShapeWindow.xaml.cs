@@ -33,6 +33,7 @@ namespace HMVTools
         public ElementId SelectedSourceDsId { get; private set; }
         public bool DeleteOriginal { get; private set; }
         public bool CreateReferencePlanes { get; private set; } = true;
+        public bool CreateCoarseCube { get; private set; } = true;
         public Dwg3DOutputMode Mode { get; private set; } = Dwg3DOutputMode.DirectShapeInProject;
         public string ShapeName { get; private set; } = "DWG_DirectShape";
 
@@ -88,6 +89,7 @@ namespace HMVTools
             pnlImport.Visibility = isModeC ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
             pnlSourceDs.Visibility = isModeC ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
             chkRefPlanes.Visibility = isFamilyMode ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+            chkCoarseCube.Visibility = isFamilyMode ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
 
             chkDeleteOriginal.Content = isModeC
                 ? "Delete source DirectShape after migration"
@@ -205,6 +207,7 @@ namespace HMVTools
             // Flags
             DeleteOriginal = chkDeleteOriginal.IsChecked == true;
             CreateReferencePlanes = chkRefPlanes.IsChecked == true;
+            CreateCoarseCube = chkCoarseCube.IsChecked == true;
 
             DialogResult = true;
             Close();
