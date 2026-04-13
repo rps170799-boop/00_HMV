@@ -131,13 +131,18 @@
     <Compile Include="Commands\FamilyControl\SignageHostingCommand.cs" />
     <Compile Include="Helpers\Migrationdataclasses.cs" />
     <Compile Include="Helpers\Transfermanager.cs" />
+    <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.xaml.cs">
+      <DependentUpon>Genericannotationtagwindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\Annotation\SpotElevationWindow.xaml.cs">
       <DependentUpon>SpotElevationWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Audit\LinkedFilesAuditWindow.xaml.cs">
+      <DependentUpon>LinkedFilesAuditWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="WindowUI\Audit\Viewauditwindow.xaml.cs">
       <DependentUpon>Viewauditwindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.cs" />
     <Compile Include="WindowUI\Annotation\AutoDimensionWindow.xaml.cs">
       <DependentUpon>AutoDimensionWindow.xaml</DependentUpon>
     </Compile>
@@ -153,7 +158,9 @@
     <Compile Include="WindowUI\DWG\Dwg3DProgressWindow.xaml.cs">
       <DependentUpon>Dwg3DProgressWindow.xaml</DependentUpon>
     </Compile>
-    <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.cs" />
+    <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.xaml.cs">
+      <DependentUpon>ConstraintsReleaseWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\Transfer\Migrateelementswindow.xaml.cs">
       <DependentUpon>Migrateelementswindow.xaml</DependentUpon>
     </Compile>
@@ -163,7 +170,6 @@
     <Compile Include="WindowUI\Audit\Dimensionauditreportwindow.cs" />
     <Compile Include="WindowUI\Audit\Familyauditconfigwindow.cs" />
     <Compile Include="Commands\Audit\LinkedFilesAuditCommand.cs" />
-    <Compile Include="WindowUI\Audit\LinkedFilesAuditWindow.cs" />
     <Compile Include="WindowUI\Audit\Sheetauditwindow.cs" />
     <Compile Include="WindowUI\Audit\Textauditconfigwindow.cs" />
     <Compile Include="WindowUI\DWG\DwgConvertWindow.cs" />
@@ -187,12 +193,21 @@
   <ItemGroup>
     <None Include="app.config" />
     <None Include="docs\index.md" />
+    <None Include="docs\transfer.md" />
     <None Include="HMV.addin" />
     <None Include="mkdocs.yml" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <Page Include="WindowUI\Annotation\Genericannotationtagwindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="WindowUI\Annotation\SpotElevationWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\Audit\LinkedFilesAuditWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
@@ -216,6 +231,10 @@
       <SubType>Designer</SubType>
     </Page>
     <Page Include="WindowUI\DWG\Dwg3DProgressWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
@@ -248,6 +267,9 @@
     <EmbeddedResource Include="Resources\textaudit_32.png" />
     <EmbeddedResource Include="Resources\topo_32.png" />
     <EmbeddedResource Include="Resources\viewaudit_32.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="docs\img\gifs\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

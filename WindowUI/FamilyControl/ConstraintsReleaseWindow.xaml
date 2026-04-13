@@ -1,0 +1,64 @@
+<Window x:Class="HMVTools.ConstraintsReleaseWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - Total Constraints Release" 
+        Height="300" Width="450"
+        WindowStyle="None" AllowsTransparency="True" 
+        Background="Transparent" WindowStartupLocation="CenterScreen"
+        FontFamily="Segoe UI">
+
+    <Border Background="#F5F5F8" BorderBrush="#C8C8D2" BorderThickness="1" Height="300" VerticalAlignment="Top">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="70"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White" Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" - Total Constraints Release" Foreground="White" FontSize="10" Margin="5,2,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="✕" Width="40" Background="Transparent" Foreground="#3C3C3C" 
+                        BorderThickness="0" FontSize="14" Cursor="Hand" Click="BtnClose_Click"/>
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="25,20,25,10">
+                <StackPanel>
+                    <TextBlock x:Name="txtCountInfo" FontSize="10" FontWeight="Bold" Foreground="#1E1E1E" Margin="0,0,0,10"/>
+
+                    <TextBlock FontSize="10" Foreground="#444444" TextWrapping="Wrap" LineHeight="16">
+                        This action will completely unconstrain the selection by:
+                        <LineBreak/>• Unpinning the objects.
+                        <LineBreak/>• Deleting all Alignment constraints (hidden padlocks).
+                        <LineBreak/>• Unlocking all Dimensions, EQs, and Labels (from these objects and surrounding items).
+                    </TextBlock>
+                </StackPanel>
+            </Grid>
+
+            <Grid Grid.Row="2">
+                <Button Content="Release Constraints" FontSize="10" Height="30" Width="150" Background="#E9AA00" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnRelease_Click" FontWeight="Bold">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="6"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

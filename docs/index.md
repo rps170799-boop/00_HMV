@@ -72,6 +72,12 @@ Herramientas para mantener la salud y el estándar del modelo.
 <br>
 **Link GIS Audit:** Permite conocer las propiedades GIS de todos los links cargados en el modelo, ademas de exportar a excel.
 
+### 4. Transfer
+Herramientas para migrar o intercambiar elementos especificos dentro de modelos.
+
+**Migrate Elements:** Permite migrar vistas, secciones y leyendas (queda pendiente configurar drafting views).
+<br>
+
 ---
 
 > Usa el menú superior o la barra de búsqueda para ver el detalle y funcionamiento de cada comando específico.
