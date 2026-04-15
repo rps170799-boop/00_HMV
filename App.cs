@@ -533,6 +533,26 @@ namespace HMVTools
             if (iconTransferUnits != null) btnTransferUnits.LargeImage = iconTransferUnits;
 
 
+            // ── Cloud Tools Panel ──
+            RibbonPanel panelCloud = app.CreateRibbonPanel("HMV Tools", "Cloud");
+
+
+            // ── Massive link files into revit ──────────────────────────
+            PushButtonData btnLinkCloudFiles = new PushButtonData(
+                "LinkFiles",
+                "Link Cloud\nFiles",
+                path,
+                "HMVTools.BatchCloudLinkCommand");
+            btnLinkAudit.ToolTip = "Massive Link Files from cloud services (ACC)";
+            btnLinkAudit.LongDescription =
+                  "Get your project ID from your model:\n\n"
+                    + "• Show possible link files inside the project\n"
+                    + "• Allow to set Shared or PBP type of link\n"
+                    + "Linked all from cloud services";
+            PushButton btnLCF = panelCloud.AddItem(btnLinkCloudFiles) as PushButton;
+            BitmapImage iconLCF = LoadImage("HMVTools.Resources.linkcloud_32.png");
+            if (iconLCF != null) btnLCF.LargeImage = iconLCF;
+
 
 
             // ══════════════════════════════════════════════════════

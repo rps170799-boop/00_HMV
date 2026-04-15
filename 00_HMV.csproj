@@ -67,6 +67,11 @@
     <Reference Include="Microsoft.IO.RecyclableMemoryStream, Version=3.0.1.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
       <HintPath>packages\Microsoft.IO.RecyclableMemoryStream.3.0.1\lib\netstandard2.0\Microsoft.IO.RecyclableMemoryStream.dll</HintPath>
     </Reference>
+    <Reference Include="NewtonSoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\..\..\..\..\Program Files\Autodesk\Revit 2023\NewtonSoft.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="RBush, Version=4.0.0.0, Culture=neutral, PublicKeyToken=c77e27b81f4d0187, processorArchitecture=MSIL">
@@ -125,6 +130,7 @@
     <Compile Include="Commands\Annotation\AlignSpotElevationsCommand.cs" />
     <Compile Include="Commands\Annotation\AutoDimensionWindow.cs" />
     <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
+    <Compile Include="Commands\Cloud\BatchCloudLinkCommand.cs" />
     <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
@@ -139,7 +145,9 @@
     <Compile Include="Commands\FamilyControl\Refreshztofloorcommand.cs" />
     <Compile Include="Commands\FamilyControl\SignageHostingCommand.cs" />
     <Compile Include="Commands\Transfer\TransferUnitsCommand.cs" />
+    <Compile Include="Helpers\ApsManager.cs" />
     <Compile Include="Helpers\Migrationdataclasses.cs" />
+    <Compile Include="Helpers\PkceAuthenticator.cs" />
     <Compile Include="Helpers\Transfermanager.cs" />
     <Compile Include="Helpers\TransferUnitsManager.cs" />
     <Compile Include="Helpers\TransferUnitsResult.cs" />
