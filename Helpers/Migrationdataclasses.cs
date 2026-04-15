@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using Autodesk.Revit.DB;
 
 namespace HMVTools
 {
@@ -25,5 +26,15 @@ namespace HMVTools
         public List<int> SelectedViewIds { get; set; } = new List<int>();
         public bool IncludeAnnotations { get; set; } = true;
         public bool IncludeRefMarkers { get; set; } = true;
+    }
+
+    /// <summary>Represents a target document for the Transfer Units tool.</summary>
+    public class TargetDocEntry
+    {
+        public string Title { get; set; }
+        public string PathName { get; set; }
+        public Document OpenDoc { get; set; }
+        public bool IsOpenInRevit { get; set; }
+        public bool IsSelected { get; set; } = true;
     }
 }

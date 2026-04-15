@@ -74,13 +74,13 @@ namespace HMVTools
             var surveyPointConverter = new FrequencyTextColorConverter(_mostFrequentSurveyPoint);
 
             gridView.Columns.Add(CreateColumn("Revit Link Name", "LinkName", 260));
-            gridView.Columns.Add(CreateColumn("Building Desc.", "BuildingDescription", 140));
             gridView.Columns.Add(CreateColumn("Building Name", "BuildingName", 140));
+            gridView.Columns.Add(CreateColumn("Building Desc.", "BuildingDescription", 140));
+            gridView.Columns.Add(CreateColumn("Site Name", "SiteName", 120));
             gridView.Columns.Add(CreateColumn("GIS Code", "GisCode", 100));
             gridView.Columns.Add(CreateColumn("Latitude", "Latitude", 90));
             gridView.Columns.Add(CreateColumn("Longitude", "Longitude", 90));
             gridView.Columns.Add(CreateColumn("True North", "TrueNorthAngle", 90));
-            gridView.Columns.Add(CreateColumn("Site Name", "SiteName", 120));
             gridView.Columns.Add(CreateColumn("Project Base Point", "ProjectBasePoint", 210));
             gridView.Columns.Add(CreateColumn("Survey Point", "SurveyPoint", 210, surveyPointConverter));
 
@@ -164,7 +164,7 @@ namespace HMVTools
                                 System.Globalization.CultureInfo.InvariantCulture,
                                 out double parsed))
             {
-                return parsed.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
+                return parsed.ToString("F10", System.Globalization.CultureInfo.InvariantCulture);
             }
             return value;
         }
@@ -199,19 +199,19 @@ namespace HMVTools
                 {
                     var ws = package.Workbook.Worksheets.Add("Linked Files Audit");
 
-                    ws.Cells[1, 1].Value = "Host File Name";
-                    ws.Cells[1, 2].Value = "Revit Link Name";
+                    
+                    ws.Cells[1, 1].Value = "Revit Link Name";
+                    ws.Cells[1, 2].Value = "Building Name";
                     ws.Cells[1, 3].Value = "Building Description";
-                    ws.Cells[1, 4].Value = "Building Name";
+                    ws.Cells[1, 4].Value = "Site Name";
                     ws.Cells[1, 5].Value = "GIS Coordinate System";
                     ws.Cells[1, 6].Value = "Latitude";
                     ws.Cells[1, 7].Value = "Longitude";
-                    ws.Cells[1, 8].Value = "Site Name";
-                    ws.Cells[1, 9].Value = "Angle to True North";
-                    ws.Cells[1, 10].Value = "Project Base Point";
-                    ws.Cells[1, 11].Value = "Survey Point";
+                    ws.Cells[1, 8].Value = "Angle to True North";
+                    ws.Cells[1, 9].Value = "Project Base Point";
+                    ws.Cells[1, 10].Value = "Survey Point";
 
-                    var headerRange = ws.Cells["A1:K1"];
+                    var headerRange = ws.Cells["A1:J1"];
                     headerRange.Style.Font.Bold = true;
                     headerRange.Style.Font.Color.SetColor(System.Drawing.Color.White);
                     headerRange.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
@@ -221,17 +221,17 @@ namespace HMVTools
                     int row = 2;
                     foreach (var item in list)
                     {
-                        ws.Cells[row, 1].Value = _mainProjectName;
-                        ws.Cells[row, 2].Value = item.LinkName;
+                       // ws.Cells[row, 1].Value = _mainProjectName;
+                        ws.Cells[row, 1].Value = item.LinkName;
+                        ws.Cells[row, 2].Value = item.BuildingName;
                         ws.Cells[row, 3].Value = item.BuildingDescription;
-                        ws.Cells[row, 4].Value = item.BuildingName;
+                        ws.Cells[row, 4].Value = item.SiteName;
                         ws.Cells[row, 5].Value = item.GisCode;
                         ws.Cells[row, 6].Value = item.Latitude;
                         ws.Cells[row, 7].Value = item.Longitude;
-                        ws.Cells[row, 8].Value = item.SiteName;
-                        ws.Cells[row, 9].Value = item.TrueNorthAngle;
-                        ws.Cells[row, 10].Value = item.ProjectBasePoint;
-                        ws.Cells[row, 11].Value = item.SurveyPoint;
+                        ws.Cells[row, 8].Value = item.TrueNorthAngle;
+                        ws.Cells[row, 9].Value = item.ProjectBasePoint;
+                        ws.Cells[row, 10].Value = item.SurveyPoint;
                         row++;
                     }
 

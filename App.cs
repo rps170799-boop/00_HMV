@@ -509,6 +509,31 @@ namespace HMVTools
 
 
 
+            PushButtonData btnTransferUnitsData = new PushButtonData(
+            "TransferUnits",
+            "Transfer\nUnits",
+            path,
+            "HMVTools.TransferUnitsCommand");
+
+            btnTransferUnitsData.ToolTip = "Batch transfer Project Units from a master file to multiple target files.";
+
+            btnTransferUnitsData.LongDescription =
+                "Automates the transfer of unit settings across multiple Revit models without opening them in the UI.\n\n"
+                + "Features:\n"
+                + "• Headless batch processing for maximum performance\n"
+                + "• Transfers global settings (Decimal symbol, Digit grouping)\n"
+                + "• Deep-copies FormatOptions using the modern ForgeTypeId system\n"
+                + "• Safely handles workshared central models by detaching from central";
+
+            // Replace 'panelMain' with the actual RibbonPanel variable you want to use
+            PushButton btnTransferUnits = panelTrans.AddItem(btnTransferUnitsData) as PushButton;
+
+            // Make sure to add a 32x32 icon to your Resources and set its Build Action to 'Embedded Resource'
+            BitmapImage iconTransferUnits = LoadImage("HMVTools.Resources.transfer_units_32.png");
+            if (iconTransferUnits != null) btnTransferUnits.LargeImage = iconTransferUnits;
+
+
+
 
             // ══════════════════════════════════════════════════════
             //  PROACTIVE TRACKING — Event subscriptions

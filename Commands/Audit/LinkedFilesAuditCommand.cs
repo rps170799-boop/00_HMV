@@ -86,7 +86,7 @@ namespace HMVTools
                             double nsM = pp.NorthSouth * 0.3048;
                             double ewM = pp.EastWest * 0.3048;
                             double elevM = pp.Elevation * 0.3048;
-                            data.ProjectBasePoint = $"N/S: {nsM:F3} m, E/W: {ewM:F3} m, Elev: {elevM:F3} m";
+                            data.ProjectBasePoint = $"N/S: {nsM:F10} m, E/W: {ewM:F10} m, Elev: {elevM:F10} m";
                         }
                         else
                         {
@@ -158,7 +158,7 @@ namespace HMVTools
                 {
                     double feet = p.AsDouble();
                     double meters = feet * 0.3048;
-                    return meters.ToString("F3") + " m";
+                    return meters.ToString("F10") + " m";
                 }
             }
             return "N/A";
