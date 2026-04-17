@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
+using DocumentFormat.OpenXml.Office.CustomUI;
 using Newtonsoft.Json;
 
 namespace HMVTools
@@ -176,28 +177,35 @@ namespace HMVTools
             return report.ToString();
         }
         /// <summary>
-        /// PHASE 2: 3-Legged PKCE authentication.
-        /// Opens browser, user logs in, we get a USER token (not an app token).
-        /// This token can see whatever the logged-in user can see in ACC —
-        /// no per-project provisioning required.
+        /// PHASE 3: Smart authentication.
+        /// 1. Try silent refresh (no browser) using saved refresh token.
+        /// 2. If that fails, fall back to interactive browser login.
+        /// User only sees the browser once every ~15 days.
         /// </summary>
         public async Task<bool> AuthenticateUserInteractiveAsync()
         {
             try
             {
                 PkceAuthenticator pkce = new PkceAuthenticator();
-                PkceTokenBundle tokens = await pkce.AuthenticateInteractiveAsync();
 
+                // Step 1: Try silent refresh first
+                PkceTokenBundle tokens = await pkce.TryRefreshSilentlyAsync();
+
+                if (tokens != null)
+                {
+                    CurrentToken = tokens.AccessToken;
+                    return true; // No browser needed!
+                }
+
+                // Step 2: Silent refresh failed → full interactive login
+                tokens = await pkce.AuthenticateInteractiveAsync();
                 CurrentToken = tokens.AccessToken;
-
-                // We'll persist tokens.RefreshToken in Phase 3.
-                // For now, just keep the access token in memory for this session.
                 return true;
             }
             catch (Exception ex)
             {
                 System.Windows.MessageBox.Show(
-                    $"PKCE login failed:\n\n{ex.Message}",
+                    $"Login failed:\n\n{ex.Message}",
                     "HMV Tools - Login Error");
                 return false;
             }
@@ -205,9 +213,9 @@ namespace HMVTools
 
 
         /// <summary>
-        /// 1. Gets the first Hub (Company Account) your app has access to.
+        /// Gets the hub ID and name for the user's ACC account.
         /// </summary>
-        public async Task<string> GetFirstHubIdAsync()
+        public async Task<(string Id, string Name)> GetHubAsync()
         {
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + CurrentToken);
@@ -219,9 +227,78 @@ namespace HMVTools
             string json = await response.Content.ReadAsStringAsync();
             dynamic data = JsonConvert.DeserializeObject(json);
 
-            return data.data[0].id.ToString();
+            if (data.data == null || data.data.Count == 0)
+                throw new Exception("No ACC hubs found for this user.");
+
+            string id = data.data[0].id.ToString();
+            string name = data.data[0].attributes.name.ToString();
+            return (id, name);
         }
 
+        /// <summary>
+        /// Lists all projects visible to the user in a hub.
+        /// Returns list of (Id, Name) tuples.
+        /// </summary>
+        public async Task<List<(string Id, string Name)>> GetProjectsAsync(string hubId)
+        {
+            var projects = new List<(string Id, string Name)>();
+
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + CurrentToken);
+
+            string url = $"https://developer.api.autodesk.com/project/v1/hubs/{hubId}/projects";
+
+            // ACC paginates — follow "next" links until exhausted
+            while (!string.IsNullOrEmpty(url))
+            {
+                HttpResponseMessage response = await _httpClient.GetAsync(url);
+                response.EnsureSuccessStatusCode();
+
+                string json = await response.Content.ReadAsStringAsync();
+                dynamic data = JsonConvert.DeserializeObject(json);
+
+                foreach (var proj in data.data)
+                {
+                    string pid = proj.id.ToString();
+                    string pname = proj.attributes.name.ToString();
+                    projects.Add((pid, pname));
+                }
+
+                // Check for next page
+                url = data.links?.next?.href?.ToString();
+                if (!string.IsNullOrEmpty(url))
+                    await Task.Delay(200);
+            }
+
+            return projects;
+        }
+
+        /// <summary>
+        /// Lists top-level folders for a project (Compartido, Project Files, etc.)
+        /// </summary>
+        public async Task<List<(string Id, string Name)>> GetTopFoldersAsync(string hubId, string projectId)
+        {
+            var folders = new List<(string Id, string Name)>();
+
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + CurrentToken);
+
+            string url = $"https://developer.api.autodesk.com/project/v1/hubs/{hubId}/projects/{projectId}/topFolders";
+            HttpResponseMessage response = await _httpClient.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+
+            string json = await response.Content.ReadAsStringAsync();
+            dynamic data = JsonConvert.DeserializeObject(json);
+
+            foreach (var folder in data.data)
+            {
+                string fid = folder.id.ToString();
+                string fname = folder.attributes.name.ToString();
+                folders.Add((fid, fname));
+            }
+
+            return folders;
+        }
         /// <summary>
         /// 2. Finds the root "Project Files" folder for the active Revit project.
         /// </summary>
@@ -246,50 +323,108 @@ namespace HMVTools
         }
 
         /// <summary>
-        /// 3. Recursively scans folders politely to find all .rvt files.
+        /// Lists immediate subfolders inside a folder.
         /// </summary>
-        public async Task<List<CloudRevitFile>> FindRevitFilesPolitelyAsync(string projectId, string folderId, string currentPath = "")
+        public async Task<List<(string Id, string Name)>> GetSubFoldersAsync(string projectId, string folderId)
+        { 
+            var folders = new List<(string Id, string Name)>();
+
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + CurrentToken);
+
+            string url = $"https://developer.api.autodesk.com/data/v1/projects/{projectId}/folders/{folderId}/contents";
+            HttpResponseMessage response= await _httpClient.GetAsync(url);
+            if(!response.IsSuccessStatusCode) return folders;
+            string json = await response.Content.ReadAsStringAsync();
+            dynamic data = JsonConvert.DeserializeObject(json);
+            if (data.data == null) return folders;
+
+            foreach (var item in data.data)
+            {
+                if(item.type.ToString() == "folders")
+                {
+                    string fid = item.id.ToString();
+                    string fname = item.attributes.displayName.ToString();
+                    folders.Add((fid, fname));
+                }
+            }
+            return folders;
+        }
+
+
+        /// <summary>
+        /// Recursively scans folders to find all .rvt files.
+        /// Reports progress via optional callback. Handles 429 rate limiting.
+        /// </summary>
+        public async Task<List<CloudRevitFile>> FindRevitFilesAsync(
+            string projectId,
+            string folderId,
+            string currentPath = "",
+            Action<string, int, int> onProgress = null,
+            int folderCount = 0,
+            int fileCount = 0)
         {
             var foundFiles = new List<CloudRevitFile>();
 
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + CurrentToken);
+
             string url = $"https://developer.api.autodesk.com/data/v1/projects/{projectId}/folders/{folderId}/contents";
             HttpResponseMessage response = await _httpClient.GetAsync(url);
+
+            // Handle rate limiting with backoff
+            if (response.StatusCode == (System.Net.HttpStatusCode)429)
+            {
+                await Task.Delay(2000);
+                response = await _httpClient.GetAsync(url);
+            }
 
             if (!response.IsSuccessStatusCode) return foundFiles;
 
             string json = await response.Content.ReadAsStringAsync();
             dynamic data = JsonConvert.DeserializeObject(json);
 
+            if (data.data == null) return foundFiles;
+
             foreach (var item in data.data)
             {
                 string type = item.type.ToString();
-                string name = item.attributes.displayName?.ToString();
+                string name = item.attributes?.displayName?.ToString();
 
                 if (type == "folders")
                 {
-                    // It's a subfolder! Be polite to the server, then drill down.
-                    await Task.Delay(200);
-
+                    folderCount++;
                     string subFolderId = item.id.ToString();
                     string newPath = string.IsNullOrEmpty(currentPath) ? name : $"{currentPath} / {name}";
 
-                    var subFiles = await FindRevitFilesPolitelyAsync(projectId, subFolderId, newPath);
+                    onProgress?.Invoke(newPath, folderCount, fileCount);
+
+                    await Task.Delay(200);
+
+                    var subFiles = await FindRevitFilesAsync(
+                        projectId, subFolderId, newPath, onProgress, folderCount, fileCount);
+
                     foundFiles.AddRange(subFiles);
+                    fileCount += subFiles.Count;
                 }
                 else if (type == "items" && name != null && name.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
                 {
-                    // We found a Revit file! Save its data.
+                    // Extract the model GUID (needed for linking via Revit API)
+                    string itemId = item.id.ToString();
+
                     foundFiles.Add(new CloudRevitFile
                     {
                         Name = name,
-                        Urn = item.id.ToString(),
+                        Urn = itemId,
                         Path = currentPath
                     });
+                    fileCount++;
                 }
             }
 
             return foundFiles;
         }
+
 
         /// <summary>
         /// PHASE 2 DIAGNOSTIC v3: with user token, decode JWT + fetch hubs fresh.

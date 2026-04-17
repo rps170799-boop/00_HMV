@@ -172,6 +172,9 @@
     <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.xaml.cs">
       <DependentUpon>Gridlevelextentwindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="WindowUI\Cloud\BatchCloudLinkWindow.xaml.cs">
+      <DependentUpon>BatchCloudLinkWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\DWG\Dwg3DToShapeWindow.xaml.cs">
       <DependentUpon>Dwg3DToShapeWindow.xaml</DependentUpon>
     </Compile>
@@ -249,6 +252,10 @@
     <Page Include="WindowUI\Annotation\Gridlevelextentwindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Include="WindowUI\Cloud\BatchCloudLinkWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="WindowUI\DWG\Dwg3DToShapeWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -272,6 +279,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\linkcloud_32.png" />
     <EmbeddedResource Include="Resources\transfer_units_32.png" />
     <EmbeddedResource Include="Resources\autodim_32.png" />
     <EmbeddedResource Include="Resources\signage_32.png" />

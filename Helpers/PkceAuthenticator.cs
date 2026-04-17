@@ -51,6 +51,16 @@ namespace HMVTools
         private const string Scopes = "data:read account:read";
         private const int TimeoutMinutes = 5;
 
+        //Token persistence paths -------------
+
+        private static readonly string TokenFolder = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "HMVTools");
+
+        private static readonly string TokenFilePath = System.IO.Path.Combine(TokenFolder, "token.dat");
+
+
+
         /// <summary>
         /// Runs the full PKCE flow. Blocks until user completes login (or timeout).
         /// Returns the token bundle including refresh token for later persistence.
@@ -106,9 +116,114 @@ namespace HMVTools
                 // 7. Exchange the code for tokens
                 PkceTokenBundle tokens = await ExchangeCodeForTokensAsync(authorizationCode, codeVerifier);
 
+                // Save the refresh token for next time (no browser needed for ~15 days)
+                SaveRefreshToken(tokens.RefreshToken);
+
                 listener.Stop();
                 return tokens;
             }
+
+
+
+
+
+
+        }
+        /// <summary>
+        /// Tries to load a saved refresh token from disk and exchange it
+        /// for a fresh access token — no browser needed.
+        /// Returns null if no saved token, or if refresh fails (expired/revoked).
+        /// </summary>
+        public async Task<PkceTokenBundle> TryRefreshSilentlyAsync()
+        {
+            try
+            {
+                if (!System.IO.File.Exists(TokenFilePath))
+                    return null;
+
+                // Read and decrypt the refresh token
+                byte[] encryptedBytes = System.IO.File.ReadAllBytes(TokenFilePath);
+                byte[] decryptedBytes = System.Security.Cryptography.ProtectedData.Unprotect(
+                    encryptedBytes,
+                    null,
+                    System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                string refreshToken = Encoding.UTF8.GetString(decryptedBytes);
+
+                if (string.IsNullOrWhiteSpace(refreshToken))
+                    return null;
+
+                // Try exchanging the refresh token for a new access token
+                using (HttpClient httpClient = new HttpClient())
+                {
+                    FormUrlEncodedContent body = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("grant_type", "refresh_token"),
+                        new KeyValuePair<string, string>("client_id", DesktopClientId),
+                        new KeyValuePair<string, string>("refresh_token", refreshToken)
+                    });
+
+                    HttpResponseMessage response = await httpClient.PostAsync(TokenEndpoint, body);
+                    string responseJson = await response.Content.ReadAsStringAsync();
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        // Refresh token is expired or revoked — delete the stale file
+                        try { System.IO.File.Delete(TokenFilePath); } catch { }
+                        return null;
+                    }
+
+                    PkceTokenBundle tokens = JsonConvert.DeserializeObject<PkceTokenBundle>(responseJson);
+
+                    // Save the NEW refresh token (Autodesk rolls it on each use)
+                    SaveRefreshToken(tokens.RefreshToken);
+
+                    return tokens;
+                }
+            }
+            catch
+            {
+                // Any error (corrupt file, decryption failure, network) → fall back to interactive
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Encrypts and saves the refresh token to disk.
+        /// Uses Windows DPAPI (ProtectedData) — encrypted per-Windows-user,
+        /// no admin rights needed, can't be read by other Windows accounts.
+        /// </summary>
+        public void SaveRefreshToken(string refreshToken)
+        {
+            try
+            {
+                if (!System.IO.Directory.Exists(TokenFolder))
+                    System.IO.Directory.CreateDirectory(TokenFolder);
+
+                byte[] plainBytes = Encoding.UTF8.GetBytes(refreshToken);
+                byte[] encryptedBytes = System.Security.Cryptography.ProtectedData.Protect(
+                    plainBytes,
+                    null,
+                    System.Security.Cryptography.DataProtectionScope.CurrentUser);
+
+                System.IO.File.WriteAllBytes(TokenFilePath, encryptedBytes);
+            }
+            catch
+            {
+                // Non-fatal — if save fails, user just has to re-login next time
+            }
+        }
+
+        /// <summary>
+        /// Deletes the saved refresh token (for "sign out" functionality).
+        /// </summary>
+        public void ClearSavedToken()
+        {
+            try
+            {
+                if (System.IO.File.Exists(TokenFilePath))
+                    System.IO.File.Delete(TokenFilePath);
+            }
+            catch { }
         }
 
         /// <summary>
