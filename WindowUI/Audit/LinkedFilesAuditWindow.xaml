@@ -65,7 +65,7 @@
                 </Grid>
 
                 <Border Grid.Row="1" Background="White" CornerRadius="8" BorderBrush="#EAEAEF" BorderThickness="1">
-                    <ListView x:Name="dataListView" BorderThickness="0" Background="Transparent" Margin="2" FontSize="11">
+                    <ListView x:Name="dataListView" GridViewColumnHeader.Click="GridViewColumnHeader_Click" BorderThickness="0" Background="Transparent" Margin="2" FontSize="11">
                         <ListView.Resources>
                             <Style TargetType="GridViewColumnHeader">
                                 <Setter Property="Background" Value="#F8F8FA"/>

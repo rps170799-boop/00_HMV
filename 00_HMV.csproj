@@ -172,6 +172,9 @@
     <Compile Include="WindowUI\Annotation\Gridlevelextentwindow.xaml.cs">
       <DependentUpon>Gridlevelextentwindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="WindowUI\Cloud\FolderBrowserWindow.xaml.cs">
+      <DependentUpon>FolderBrowserWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="WindowUI\Cloud\BatchCloudLinkWindow.xaml.cs">
       <DependentUpon>BatchCloudLinkWindow.xaml</DependentUpon>
     </Compile>
@@ -251,6 +254,10 @@
     </Page>
     <Page Include="WindowUI\Annotation\Gridlevelextentwindow.xaml">
       <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="WindowUI\Cloud\FolderBrowserWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
     </Page>
     <Page Include="WindowUI\Cloud\BatchCloudLinkWindow.xaml">
       <Generator>MSBuild:Compile</Generator>

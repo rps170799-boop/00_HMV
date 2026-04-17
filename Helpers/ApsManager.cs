@@ -25,6 +25,9 @@ namespace HMVTools
         public string Name { get; set; }
         public string Urn { get; set; } // The hidden Cloud ID
         public string Path { get; set; }
+        public string Status { get; set; }
+        public int LinkTypeElementId { get; set; }
+
     }
 
     public class ApsManager
@@ -364,7 +367,7 @@ namespace HMVTools
             string url = $"https://developer.api.autodesk.com/data/v1/projects/{projectId}/items/{encodedUrn}/tip";
 
             HttpResponseMessage response = await _httpClient.GetAsync(url);
-            await Task.Delay(200);
+           
 
             if (!response.IsSuccessStatusCode) return null;
 

@@ -58,8 +58,8 @@ namespace HMVTools
                     data.GisCode = string.IsNullOrEmpty(site.GeoCoordinateSystemId) ? "Default" : site.GeoCoordinateSystemId;
 
                     // Converting Radians to Degrees for Lat/Long
-                    data.Latitude = (site.Latitude * 180 / Math.PI).ToString("F6");
-                    data.Longitude = (site.Longitude * 180 / Math.PI).ToString("F6");
+                    data.Latitude = (site.Latitude * 180 / Math.PI).ToString("F10");
+                    data.Longitude = (site.Longitude * 180 / Math.PI).ToString("F10");
 
                     // Get Active Site Name
                     data.SiteName = linkDoc.ActiveProjectLocation.Name;
@@ -128,6 +128,64 @@ namespace HMVTools
             {
                 hostName = hostName.Substring(0, hostName.Length - 4);
             }
+            // --- ADD HOST MODEL DATA AT THE END ---
+            var hostData = new LinkAuditData { LinkName = "--- HOST MODEL: " + hostName + " ---" };
+
+            Parameter hostDescParam = doc.ProjectInformation.LookupParameter("BuildingDescription");
+            hostData.BuildingDescription = (hostDescParam != null && hostDescParam.HasValue) ? hostDescParam.AsString() : "N/A";
+
+            string hostBName = doc.ProjectInformation.BuildingName;
+            hostData.BuildingName = string.IsNullOrEmpty(hostBName) ? "N/A" : hostBName;
+
+            SiteLocation hostSite = doc.SiteLocation;
+            hostData.GisCode = string.IsNullOrEmpty(hostSite.GeoCoordinateSystemId) ? "Default" : hostSite.GeoCoordinateSystemId;
+            hostData.Latitude = (hostSite.Latitude * 180 / Math.PI).ToString("F10");
+            hostData.Longitude = (hostSite.Longitude * 180 / Math.PI).ToString("F10");
+            hostData.SiteName = doc.ActiveProjectLocation.Name;
+
+            ProjectPosition hostPosition = doc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero);
+            hostData.TrueNorthAngle = (hostPosition.Angle * 180 / Math.PI).ToString("F2") + "°";
+
+            Element hostPbp = new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_ProjectBasePoint)
+                .WhereElementIsNotElementType()
+                .FirstOrDefault();
+            if (hostPbp != null)
+            {
+                string ns = SafeParamString(hostPbp, BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM);
+                string ew = SafeParamString(hostPbp, BuiltInParameter.BASEPOINT_EASTWEST_PARAM);
+                string elev = SafeParamString(hostPbp, BuiltInParameter.BASEPOINT_ELEVATION_PARAM);
+
+                if (ns == "N/A" && ew == "N/A" && elev == "N/A")
+                {
+                    double nsM = hostPosition.NorthSouth * 0.3048;
+                    double ewM = hostPosition.EastWest * 0.3048;
+                    double elevM = hostPosition.Elevation * 0.3048;
+                    hostData.ProjectBasePoint = $"N/S: {nsM:F10} m, E/W: {ewM:F10} m, Elev: {elevM:F10} m";
+                }
+                else
+                {
+                    hostData.ProjectBasePoint = $"N/S: {ns}, E/W: {ew}, Elev: {elev}";
+                }
+            }
+            else { hostData.ProjectBasePoint = "N/A"; }
+
+            Element hostSp = new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_SharedBasePoint)
+                .WhereElementIsNotElementType()
+                .FirstOrDefault();
+            if (hostSp != null)
+            {
+                string ns = SafeParamString(hostSp, BuiltInParameter.BASEPOINT_NORTHSOUTH_PARAM);
+                string ew = SafeParamString(hostSp, BuiltInParameter.BASEPOINT_EASTWEST_PARAM);
+                string elev = SafeParamString(hostSp, BuiltInParameter.BASEPOINT_ELEVATION_PARAM);
+                hostData.SurveyPoint = $"N/S: {ns}, E/W: {ew}, Elev: {elev}";
+            }
+            else { hostData.SurveyPoint = "N/A"; }
+
+            auditResults.Add(hostData);
+            // --- END HOST MODEL DATA ---
+
 
             // 2. Open the customized WPF UI
             var window = new LinkedFilesAuditWindow(auditResults, hostName);

@@ -19,6 +19,8 @@ namespace HMVTools
         private List<LinkAuditData> _auditData;
         private string _mainProjectName;
         private string _mostFrequentSurveyPoint;
+        private GridViewColumnHeader _lastHeaderClicked = null;
+        private System.ComponentModel.ListSortDirection _lastDirection = System.ComponentModel.ListSortDirection.Ascending;
 
         public LinkedFilesAuditWindow(List<LinkAuditData> auditData, string projectName)
         {
@@ -33,9 +35,10 @@ namespace HMVTools
                 item.SurveyPoint = StandardizeSurveyPoint(item.SurveyPoint);
             }
 
-            // Sort: BuildingDescription, then LinkName (original behavior)
+            // Sort: Force Host Model to bottom, then BuildingDescription, then LinkName
             _auditData = auditData
-                .OrderBy(x => x.BuildingDescription)
+                .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("--- HOST") ? 1 : 0)
+                .ThenBy(x => x.BuildingDescription)
                 .ThenBy(x => x.LinkName)
                 .ToList();
 
@@ -133,7 +136,76 @@ namespace HMVTools
                     .ToList();
             }
         }
+        // ── Column Header Click Sorting ──────────────────────────
+        private void GridViewColumnHeader_Click(object sender, RoutedEventArgs e)
+        {
+            var headerClicked = e.OriginalSource as GridViewColumnHeader;
+            if (headerClicked == null || headerClicked.Role == GridViewColumnHeaderRole.Padding) return;
 
+            string header = headerClicked.Column.Header as string;
+            if (string.IsNullOrEmpty(header)) return;
+
+            // Match header to property name
+            string sortBy = "";
+            switch (header)
+            {
+                case "Revit Link Name": sortBy = "LinkName"; break;
+                case "Building Name": sortBy = "BuildingName"; break;
+                case "Building Desc.": sortBy = "BuildingDescription"; break;
+                case "Site Name": sortBy = "SiteName"; break;
+                case "GIS Code": sortBy = "GisCode"; break;
+                case "Latitude": sortBy = "Latitude"; break;
+                case "Longitude": sortBy = "Longitude"; break;
+                case "True North": sortBy = "TrueNorthAngle"; break;
+                case "Project Base Point": sortBy = "ProjectBasePoint"; break;
+                case "Survey Point": sortBy = "SurveyPoint"; break;
+            }
+
+            if (string.IsNullOrEmpty(sortBy)) return;
+
+            // Toggle sorting direction
+            System.ComponentModel.ListSortDirection direction;
+            if (headerClicked != _lastHeaderClicked)
+            {
+                direction = System.ComponentModel.ListSortDirection.Ascending;
+            }
+            else
+            {
+                direction = _lastDirection == System.ComponentModel.ListSortDirection.Ascending
+                    ? System.ComponentModel.ListSortDirection.Descending
+                    : System.ComponentModel.ListSortDirection.Ascending;
+            }
+
+            SortList(sortBy, direction);
+
+            _lastHeaderClicked = headerClicked;
+            _lastDirection = direction;
+        }
+
+        private void SortList(string sortBy, System.ComponentModel.ListSortDirection direction)
+        {
+            var propInfo = typeof(LinkAuditData).GetProperty(sortBy);
+            if (propInfo == null) return;
+
+            // Sort data while forcing Host model to remain at the bottom
+            if (direction == System.ComponentModel.ListSortDirection.Ascending)
+            {
+                _auditData = _auditData
+                    .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("--- HOST") ? 1 : 0)
+                    .ThenBy(x => propInfo.GetValue(x, null))
+                    .ToList();
+            }
+            else
+            {
+                _auditData = _auditData
+                    .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("--- HOST") ? 1 : 0)
+                    .ThenByDescending(x => propInfo.GetValue(x, null))
+                    .ToList();
+            }
+
+            // Re-apply search filter to update the view
+            SearchBox_TextChanged(null, null);
+        }
         // ── Survey Point standardization ──────────────────────────
         private string StandardizeSurveyPoint(string input)
         {
