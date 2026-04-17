@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -180,32 +182,120 @@ namespace HMVTools
                     // Step 7: Crawl for .rvt files
                     var rvtFiles = System.Threading.Tasks.Task.Run(async () =>
                     {
-                        return await aps.FindRevitFilesAsync(selectedProjectId, selectedFolderId, selectedFolderName);
+                        return await aps.FindRevitFilesAsync(selectedProjectId, selectedFolderId);
                     }).GetAwaiter().GetResult();
 
-                    if( rvtFiles.Count == 0)
+                    if (rvtFiles.Count == 0)
                     {
                         TaskDialog.Show("HMV Tools", $"No .rvt files found in '{selectedFolderName}'.");
                         return Result.Cancelled;
                     }
-                    // Step 8: Show WPF window
 
-                    var window = new BatchCloudLinkWindow(rvtFiles,selectedProjectName,selectedFolderName);
-                    window.ShowDialog();
-                    if (window.DialogResult != true || window.SelectedFiles == null || window.SelectedFiles.Count == 0)
+                    // Step 8: Detect existing links to avoid duplicates
+                    var existingLinkNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var linkCollector = new FilteredElementCollector(doc);
+                    foreach (RevitLinkType linkType in linkCollector.OfClass(typeof(RevitLinkType)).Cast<RevitLinkType>())
                     {
+                        string linkName = linkType.Name;
+                        existingLinkNames.Add(linkName);
+                        if (linkName.EndsWith(".rvt", StringComparison.OrdinalIgnoreCase))
+                            existingLinkNames.Add(linkName.Substring(0, linkName.Length - 4));
+                    }
+
+                    // Filter out already-linked files
+                    var availableFiles = rvtFiles.Where(f =>
+                        !existingLinkNames.Contains(f.Name) &&
+                        !existingLinkNames.Contains(System.IO.Path.GetFileNameWithoutExtension(f.Name))
+                    ).ToList();
+
+                    int alreadyLinked = rvtFiles.Count - availableFiles.Count;
+
+                    if (availableFiles.Count == 0)
+                    {
+                        TaskDialog.Show("HMV Tools",
+                            $"All {rvtFiles.Count} RVT file(s) are already linked in this model.");
                         return Result.Cancelled;
                     }
-                    // Step 9: Placeholder — Phase 7 will do the actual linking here
-                    var summary = new System.Text.StringBuilder();
-                    summary.AppendLine($"Ready to link {window.SelectedFiles.Count} file(s):\n");
-                    foreach (var f in window.SelectedFiles)
-                    {
-                        summary.AppendLine($"  • {f.Name} [{f.Placement}]");
-                    }
-                    summary.AppendLine($"\nPhase 7 will create the actual Revit links.");
 
-                    TaskDialog.Show("HMV Tools - Link Preview", summary.ToString());
+                    // Step 9: Show WPF window
+                    string windowSubtitle = $"{selectedProjectName} / {selectedFolderName}";
+                    if (alreadyLinked > 0)
+                        windowSubtitle += $"  ({alreadyLinked} already linked — excluded)";
+
+                    var window = new BatchCloudLinkWindow(availableFiles, selectedProjectName, selectedFolderName);
+                    if (alreadyLinked > 0)
+                        window.SubHeaderLabel.Text = windowSubtitle;
+
+                    window.ShowDialog();
+
+                    if (window.DialogResult != true || window.SelectedFiles == null || window.SelectedFiles.Count == 0)
+                        return Result.Cancelled;
+
+                    // Step 10: Resolve cloud GUIDs and create links
+                    var results = new System.Text.StringBuilder();
+                    int successCount = 0;
+                    int failCount = 0;
+
+                    foreach (var file in window.SelectedFiles)
+                    {
+                        try
+                        {
+                            // Resolve model GUID from APS (background thread)
+                            var guids = System.Threading.Tasks.Task.Run(async () =>
+                            {
+                                return await aps.ResolveCloudGuidsAsync(selectedProjectId, file.Urn);
+                            }).GetAwaiter().GetResult();
+
+                            if (guids == null)
+                            {
+                                results.AppendLine($"FAILED: {file.Name} — Could not resolve cloud GUIDs");
+                                failCount++;
+                                continue;
+                            }
+
+                            Guid linkProjectGuid = guids.Value.ProjectGuid;
+                            Guid linkModelGuid = guids.Value.ModelGuid;
+
+                            // If APS didn't return a project GUID, use the host document's
+                            if (linkProjectGuid == Guid.Empty)
+                                linkProjectGuid = revitProjectId;
+
+                            // Create cloud model path
+                            ModelPath linkPath = ModelPathUtils.ConvertCloudGUIDsToCloudPath(
+                                "US", linkProjectGuid, linkModelGuid);
+
+                            // Create the link in Revit
+                            using (Transaction tx = new Transaction(doc, "Link " + file.Name))
+                            {
+                                tx.Start();
+                                RevitLinkOptions opts = new RevitLinkOptions(false);
+                                LinkLoadResult loadResult = RevitLinkType.Create(doc, linkPath, opts);
+
+                                ElementId linkTypeId = loadResult.ElementId;
+                                RevitLinkInstance.Create(doc, linkTypeId);
+                                tx.Commit();
+                            }
+
+                            results.AppendLine($"OK: {file.Name}");
+                            successCount++;
+                        }
+                        catch (Exception ex)
+                        {
+                            results.AppendLine($"FAILED: {file.Name} — {ex.Message}");
+                            failCount++;
+                        }
+                    }
+
+                    // Step 11: Show results
+                    string logPath = System.IO.Path.Combine(
+                        System.IO.Path.GetTempPath(),
+                        $"HMV_LinkResults_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                    System.IO.File.WriteAllText(logPath, results.ToString());
+
+                    TaskDialog.Show("HMV Tools - Link Results",
+                        $"Linked: {successCount}  |  Failed: {failCount}\n\n" +
+                        results.ToString() +
+                        $"\nFull log: {logPath}");
 
                 }
                 else

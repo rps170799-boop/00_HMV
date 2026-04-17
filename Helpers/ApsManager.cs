@@ -350,6 +350,71 @@ namespace HMVTools
             }
             return folders;
         }
+        /// <summary>
+        /// Gets the model GUID and project GUID for a cloud RVT file
+        /// by querying its tip (latest) version from APS.
+        /// These GUIDs are required by ModelPathUtils.ConvertCloudGUIDsToCloudPath.
+        /// </summary>
+        public async Task<(Guid ProjectGuid, Guid ModelGuid)?> ResolveCloudGuidsAsync(string projectId, string itemUrn)
+        {
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("Authorization", "Bearer " + CurrentToken);
+
+            string encodedUrn = Uri.EscapeDataString(itemUrn);
+            string url = $"https://developer.api.autodesk.com/data/v1/projects/{projectId}/items/{encodedUrn}/tip";
+
+            HttpResponseMessage response = await _httpClient.GetAsync(url);
+            await Task.Delay(200);
+
+            if (!response.IsSuccessStatusCode) return null;
+
+            string json = await response.Content.ReadAsStringAsync();
+            dynamic data = JsonConvert.DeserializeObject(json);
+
+            // Strategy 1: Explicit GUIDs in the version's extension data (C4R models)
+            try
+            {
+                dynamic extData = data.data?.attributes?.extension?.data;
+                if (extData != null)
+                {
+                    string modelGuidStr = extData.modelGuid?.ToString();
+                    string projectGuidStr = extData.projectGuid?.ToString();
+
+                    if (!string.IsNullOrEmpty(modelGuidStr) && !string.IsNullOrEmpty(projectGuidStr))
+                    {
+                        return (Guid.Parse(projectGuidStr), Guid.Parse(modelGuidStr));
+                    }
+                }
+            }
+            catch { }
+
+            // Strategy 2: Decode from version URN (urn:adsk.wipprod:fs.file:vf.BASE64?version=N)
+            try
+            {
+                string versionId = data.data?.id?.ToString();
+                if (!string.IsNullOrEmpty(versionId) && versionId.Contains("vf.") && versionId.Contains("?"))
+                {
+                    int vfStart = versionId.IndexOf("vf.") + 3;
+                    int vfEnd = versionId.IndexOf("?");
+                    string base64Part = versionId.Substring(vfStart, vfEnd - vfStart);
+
+                    base64Part = base64Part.Replace('-', '+').Replace('_', '/');
+                    switch (base64Part.Length % 4)
+                    {
+                        case 2: base64Part += "=="; break;
+                        case 3: base64Part += "="; break;
+                    }
+                    byte[] guidBytes = Convert.FromBase64String(base64Part);
+                    if (guidBytes.Length == 16)
+                    {
+                        return (Guid.Empty, new Guid(guidBytes));
+                    }
+                }
+            }
+            catch { }
+
+            return null;
+        }
 
 
         /// <summary>
