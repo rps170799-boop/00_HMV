@@ -37,7 +37,7 @@ namespace HMVTools
 
             // Sort: Force Host Model to bottom, then BuildingDescription, then LinkName
             _auditData = auditData
-                .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("--- HOST") ? 1 : 0)
+                .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("<Host Model>") ? 1 : 0)
                 .ThenBy(x => x.BuildingDescription)
                 .ThenBy(x => x.LinkName)
                 .ToList();
@@ -191,14 +191,14 @@ namespace HMVTools
             if (direction == System.ComponentModel.ListSortDirection.Ascending)
             {
                 _auditData = _auditData
-                    .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("--- HOST") ? 1 : 0)
+                    .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("<Host Model>") ? 1 : 0)
                     .ThenBy(x => propInfo.GetValue(x, null))
                     .ToList();
             }
             else
             {
                 _auditData = _auditData
-                    .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("--- HOST") ? 1 : 0)
+                    .OrderBy(x => x.LinkName != null && x.LinkName.StartsWith("<Host Model>") ? 1 : 0)
                     .ThenByDescending(x => propInfo.GetValue(x, null))
                     .ToList();
             }

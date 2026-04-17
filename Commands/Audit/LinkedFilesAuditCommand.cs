@@ -129,7 +129,7 @@ namespace HMVTools
                 hostName = hostName.Substring(0, hostName.Length - 4);
             }
             // --- ADD HOST MODEL DATA AT THE END ---
-            var hostData = new LinkAuditData { LinkName = "--- HOST MODEL: " + hostName + " ---" };
+            var hostData = new LinkAuditData { LinkName = "<Host Model>: " + hostName + " ---" };
 
             Parameter hostDescParam = doc.ProjectInformation.LookupParameter("BuildingDescription");
             hostData.BuildingDescription = (hostDescParam != null && hostDescParam.HasValue) ? hostDescParam.AsString() : "N/A";
