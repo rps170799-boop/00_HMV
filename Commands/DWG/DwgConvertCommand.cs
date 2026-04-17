@@ -160,6 +160,43 @@ namespace HMVTools
                     using (DwgReader reader = new DwgReader(dwgPath))
                     {
                         cadDoc = reader.Read();
+                        // DEBUG - count all entity types
+                        var typeCounts = new Dictionary<string, int>();
+                        void CountEntities(IEnumerable<ACadSharp.Entities.Entity> ents, string prefix)
+                        {
+                            foreach (var e in ents)
+                            {
+                                string key = prefix + e.GetType().Name;
+                                if (!typeCounts.ContainsKey(key)) typeCounts[key] = 0;
+                                typeCounts[key]++;
+
+                                if (e is ACadSharp.Entities.Insert blk && blk.Block != null)
+                                    CountEntities(blk.Block.Entities, prefix + "  ");
+
+                                // Check for attributes
+                                if (e is ACadSharp.Entities.Insert ins2)
+                                {
+                                    try
+                                    {
+                                        var atts = ins2.Attributes;
+                                        if (atts != null && atts.Count > 0)
+                                        {
+                                            if (!typeCounts.ContainsKey(prefix + "ATTRIB"))
+                                                typeCounts[prefix + "ATTRIB"] = 0;
+                                            typeCounts[prefix + "ATTRIB"] += atts.Count;
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                        CountEntities(cadDoc.Entities, "");
+
+                        StringBuilder debugMsg = new StringBuilder();
+                        debugMsg.AppendLine("Entity types found:");
+                        foreach (var kv in typeCounts.OrderBy(k => k.Key))
+                            debugMsg.AppendLine(kv.Key + ": " + kv.Value);
+                        TaskDialog.Show("DEBUG Entities", debugMsg.ToString());
                     }
 
                     List<DwgTextData> rawTexts = new List<DwgTextData>();
@@ -783,6 +820,37 @@ namespace HMVTools
 
                 if (attach >= 1 && attach <= 3) vAlign = 1;
                 else if (attach >= 4 && attach <= 6) vAlign = 2;
+            }
+            // Check for attributed inserts (block attributes)
+            if (entity is ACadSharp.Entities.Insert attIns)
+            {
+                try
+                {
+                    foreach (var att in attIns.Attributes)
+                    {
+                        string attText = att.Value;
+                        if (string.IsNullOrWhiteSpace(attText)) continue;
+
+                        double ax = att.InsertPoint.X;
+                        double ay = att.InsertPoint.Y;
+                        double aHeight = att.Height;
+                        double aRot = att.Rotation;
+
+                        // Apply accumulated transform
+                        double arx = ax * tscale * Math.Cos(trot)
+                                  - ay * tscale * Math.Sin(trot) + tx;
+                        double ary = ax * tscale * Math.Sin(trot)
+                                  + ay * tscale * Math.Cos(trot) + ty;
+
+                        aHeight *= tscale;
+                        aRot += trot;
+
+                        rawTexts.Add(new DwgTextData(attText,
+                            new XYZ(arx, ary, 0), aHeight, aRot,
+                            HorizontalTextAlignment.Left, 3));
+                    }
+                }
+                catch { }
             }
 
             if (string.IsNullOrWhiteSpace(text)) return;
