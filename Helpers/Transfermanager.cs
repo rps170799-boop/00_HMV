@@ -252,6 +252,12 @@ namespace HMVTools
             {
                 t.Start();
 
+                // Snapshot existing views to detect "fake" copies
+                var existingViewIds = new HashSet<int>(
+                    new FilteredElementCollector(target)
+                        .OfClass(typeof(View))
+                        .Select(v => v.Id.IntegerValue));
+                int batchSuccesses = 0;
                 int failures = 0;
 
                 // Copy one view at a time so the source→target pairing is
@@ -262,12 +268,40 @@ namespace HMVTools
                 foreach (var srcId in ids)
                 {
                     string viewName = "(unknown)";
+                    View srcV = null;
                     try
                     {
-                        View v = source.GetElement(srcId) as View;
-                        if (v != null) viewName = v.Name;
+                        srcV = source.GetElement(srcId) as View;
+                        if (srcV != null) viewName = srcV.Name;
                     }
-                    catch { /* name lookup is best-effort */ }
+                    catch { }
+
+                    // Pre-check: use ForceCreate for all spatial views
+                    // when the target already has matching content.
+                    // CopyElements is unreliable for Plans (returns
+                    // existing view) and Sections (misplaces origin).
+                    bool needsForcePath = false;
+
+                    if (srcV is ViewPlan srcPlan && srcPlan.GenLevel != null)
+                    {
+                        // Plans: force if level already exists
+                        Level srcLev = source.GetElement(srcPlan.GenLevel.Id) as Level;
+                        if (srcLev != null)
+                        {
+                            Level tgtLev = FindClosestLevel(target, srcLev.Elevation);
+                            if (tgtLev != null
+                                && Math.Abs(tgtLev.Elevation - srcLev.Elevation) < 0.01)
+                            {
+                                needsForcePath = true;
+                            }
+                        }
+                    }
+                    else if (srcV is ViewSection)
+                    {
+                        // Sections: always force — CopyElements
+                        // doesn't reliably transform the crop box
+                        needsForcePath = true;
+                    }
 
                     using (var sub = new SubTransaction(target))
                     {
@@ -275,36 +309,83 @@ namespace HMVTools
                         {
                             sub.Start();
 
-                            var single = new List<ElementId> { srcId };
-
-                            ICollection<ElementId> copied =
-                                ElementTransformUtils.CopyElements(
-                                    source, single, target, transform, opts);
-
-                            if (copied != null && copied.Count > 0)
+                            if (needsForcePath)
                             {
-                                viewMap[srcId] = copied.First();
-                                result.ViewsCreated++;
-                                sub.Commit();
+                                // Go straight to Duplicate — no CopyElements
+                                ElementId forced = ForceCreateView(
+                                    source, target, srcId, result);
+
+                                if (forced != null
+                                    && forced != ElementId.InvalidElementId)
+                                {
+                                    viewMap[srcId] = forced;
+                                    result.ViewsCreated++;
+                                    batchSuccesses++;
+                                    sub.Commit();
+                                }
+                                else
+                                {
+                                    sub.RollBack();
+                                    failures++;
+                                    result.Warnings.Add(
+                                        $"View '{viewName}': could not "
+                                        + "duplicate in target.");
+                                }
                             }
                             else
                             {
-                                sub.RollBack();
-                                failures++;
-                                result.Warnings.Add(
-                                    $"View '{viewName}' (Id {srcId.IntegerValue}) "
-                                    + "produced no copy result, skipped.");
+                                // Normal path: CopyElements
+                                var single = new List<ElementId> { srcId };
+
+                                ICollection<ElementId> copied =
+                                    ElementTransformUtils.CopyElements(
+                                        source, single, target,
+                                        transform, opts);
+
+                                if (copied != null && copied.Count > 0)
+                                {
+                                    ElementId newId = copied.First();
+
+                                    if (existingViewIds.Contains(
+                                            newId.IntegerValue))
+                                    {
+                                        // Shouldn't happen but safety net
+                                        sub.RollBack();
+                                        failures++;
+                                        result.Warnings.Add(
+                                            $"View '{viewName}': "
+                                            + "returned existing view.");
+                                    }
+                                    else
+                                    {
+                                        viewMap[srcId] = newId;
+                                        result.ViewsCreated++;
+                                        batchSuccesses++;
+                                        sub.Commit();
+                                    }
+                                }
+                                else
+                                {
+                                    sub.RollBack();
+                                    failures++;
+                                    result.Warnings.Add(
+                                        $"View '{viewName}' produced "
+                                        + "no result, skipped.");
+                                }
                             }
                         }
                         catch (Exception ex)
                         {
-                            if (sub.HasStarted() && !sub.HasEnded())
-                                sub.RollBack();
+                            try
+                            {
+                                if (sub.HasStarted() && !sub.HasEnded())
+                                    sub.RollBack();
+                            }
+                            catch { }
 
                             failures++;
                             result.Warnings.Add(
-                                $"View '{viewName}' (Id {srcId.IntegerValue}) "
-                                + $"failed to copy, skipped: {ex.Message}");
+                                $"View '{viewName}' failed: {ex.Message}");
                         }
                     }
                 }
@@ -465,29 +546,8 @@ namespace HMVTools
                         srcView, tgtView, ids, opts, result,
                         $"{bic} in '{srcView.Name}'");
 
-                    if (!copied)
-                    {
-                        // Fallback: doc-to-doc into target view's doc
-                        // (elements land without view ownership but
-                        // at least they exist)
-                        using (var t = new Transaction(target,
-                            $"HMV – {bic} fallback"))
-                        {
-                            t.Start();
-                            try
-                            {
-                                var c = ElementTransformUtils.CopyElements(
-                                    source, ids, target,
-                                    Transform.Identity, opts);
-                                result.AnnotationsCopied += c.Count;
-                                t.Commit();
-                            }
-                            catch
-                            {
-                                t.RollBack();
-                            }
-                        }
-                    }
+                    // No fallback — doc-to-doc copies cause
+                    // link name conflicts and orphaned elements
                 }
             }
         }
@@ -846,6 +906,176 @@ namespace HMVTools
                 }
             }
             catch { /* not available on all view types */ }
+        }
+        private static ElementId ForceCreateView(
+            Document source, Document target,
+            ElementId srcViewId, TransferResult result)
+        {
+            View srcView = source.GetElement(srcViewId) as View;
+            if (srcView == null) return ElementId.InvalidElementId;
+
+            try
+            {
+                if (srcView is ViewPlan srcPlan)
+                    return ForceCreatePlan(source, target, srcPlan, result);
+
+                if (srcView is ViewSection srcSection)
+                    return ForceCreateSection(source, target, srcSection, result);
+
+                return ElementId.InvalidElementId;
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"ForceCreate failed for '{srcView.Name}': {ex.Message}");
+                return ElementId.InvalidElementId;
+            }
+        }
+
+        private static ElementId ForceCreatePlan(
+            Document source, Document target,
+            ViewPlan srcPlan, TransferResult result)
+        {
+            // Find the existing view on the matching level
+            Level srcLevel = source.GetElement(srcPlan.GenLevel.Id) as Level;
+            if (srcLevel == null) return ElementId.InvalidElementId;
+
+            Level tgtLevel = FindClosestLevel(target, srcLevel.Elevation);
+            if (tgtLevel == null) return ElementId.InvalidElementId;
+
+            // Find existing ViewPlan on that level
+            ViewPlan existingView = new FilteredElementCollector(target)
+                .OfClass(typeof(ViewPlan))
+                .Cast<ViewPlan>()
+                .FirstOrDefault(v => !v.IsTemplate
+                    && v.GenLevel != null
+                    && v.GenLevel.Id == tgtLevel.Id
+                    && v.ViewType == srcPlan.ViewType);
+
+            if (existingView == null)
+            {
+                result.Warnings.Add(
+                    $"No existing view on level '{tgtLevel.Name}' "
+                    + "to duplicate.");
+                return ElementId.InvalidElementId;
+            }
+
+            // Duplicate it (WithDetailing keeps annotations if any)
+            ElementId newId = existingView.Duplicate(
+                ViewDuplicateOption.WithDetailing);
+
+            ViewPlan newView = target.GetElement(newId) as ViewPlan;
+            if (newView == null) return ElementId.InvalidElementId;
+
+            newView.Name = GetUniqueViewName(target, srcPlan.Name);
+
+            // Match crop box from source
+            if (srcPlan.CropBoxActive)
+            {
+                try
+                {
+                    newView.CropBox = srcPlan.CropBox;
+                    newView.CropBoxActive = true;
+                    newView.CropBoxVisible = srcPlan.CropBoxVisible;
+                }
+                catch { }
+            }
+
+            // Match view range from source
+            try
+            {
+                PlanViewRange srcRange = srcPlan.GetViewRange();
+                PlanViewRange tgtRange = newView.GetViewRange();
+                tgtRange.SetOffset(PlanViewPlane.TopClipPlane,
+                    srcRange.GetOffset(PlanViewPlane.TopClipPlane));
+                tgtRange.SetOffset(PlanViewPlane.CutPlane,
+                    srcRange.GetOffset(PlanViewPlane.CutPlane));
+                tgtRange.SetOffset(PlanViewPlane.BottomClipPlane,
+                    srcRange.GetOffset(PlanViewPlane.BottomClipPlane));
+                tgtRange.SetOffset(PlanViewPlane.ViewDepthPlane,
+                    srcRange.GetOffset(PlanViewPlane.ViewDepthPlane));
+                newView.SetViewRange(tgtRange);
+            }
+            catch { }
+
+            // Match scale
+            try { newView.Scale = srcPlan.Scale; } catch { }
+
+            return newView.Id;
+        }
+
+        private static ElementId ForceCreateSection(
+            Document source, Document target,
+            ViewSection srcSection, TransferResult result)
+        {
+            ViewFamily vf = srcSection.ViewType == ViewType.Detail
+                ? ViewFamily.Detail : ViewFamily.Section;
+
+            ElementId vftId = new FilteredElementCollector(target)
+                .OfClass(typeof(ViewFamilyType))
+                .Cast<ViewFamilyType>()
+                .Where(x => x.ViewFamily == vf)
+                .Select(x => x.Id)
+                .FirstOrDefault();
+
+            if (vftId == null || vftId == ElementId.InvalidElementId)
+                return ElementId.InvalidElementId;
+
+            // Transform the section box to target coordinates
+            Transform coordTransform =
+                ComputeSharedCoordinateTransform(source, target);
+
+            BoundingBoxXYZ srcBox = srcSection.CropBox;
+            Transform srcT = srcBox.Transform;
+
+            // Remap origin and basis vectors
+            BoundingBoxXYZ tgtBox = new BoundingBoxXYZ();
+
+            Transform newT = Transform.Identity;
+            newT.Origin = coordTransform.OfPoint(srcT.Origin);
+            newT.BasisX = coordTransform.OfVector(srcT.BasisX).Normalize();
+            newT.BasisY = coordTransform.OfVector(srcT.BasisY).Normalize();
+            newT.BasisZ = coordTransform.OfVector(srcT.BasisZ).Normalize();
+
+            tgtBox.Transform = newT;
+            tgtBox.Min = srcBox.Min;  // local extents stay the same
+            tgtBox.Max = srcBox.Max;
+            tgtBox.Enabled = true;
+
+            ViewSection newView = ViewSection.CreateSection(
+                target, vftId, tgtBox);
+
+            newView.Name = GetUniqueViewName(target, srcSection.Name);
+            newView.CropBoxActive = srcSection.CropBoxActive;
+            newView.CropBoxVisible = srcSection.CropBoxVisible;
+            try { newView.Scale = srcSection.Scale; } catch { }
+
+            return newView.Id;
+        }
+
+        private static Level FindClosestLevel(Document doc, double elevation)
+        {
+            return new FilteredElementCollector(doc)
+                .OfClass(typeof(Level))
+                .Cast<Level>()
+                .OrderBy(l => Math.Abs(l.Elevation - elevation))
+                .FirstOrDefault();
+        }
+
+        private static string GetUniqueViewName(Document doc, string desired)
+        {
+            var existing = new HashSet<string>(
+                new FilteredElementCollector(doc)
+                    .OfClass(typeof(View))
+                    .Cast<View>()
+                    .Where(v => !v.IsTemplate)
+                    .Select(v => v.Name));
+
+            if (!existing.Contains(desired)) return desired;
+
+            int n = 2;
+            while (existing.Contains($"{desired} ({n})")) n++;
+            return $"{desired} ({n})";
         }
     }
 }

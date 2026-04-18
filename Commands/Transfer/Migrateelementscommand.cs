@@ -188,7 +188,18 @@ namespace HMVTools
                             }
                         }
                     }
-
+                    // ── Debug: check if views are actually new ──
+                    foreach (var kvp in viewMap)
+                    {
+                        View srcV = srcDoc.GetElement(kvp.Key) as View;
+                        View tgtV = tgtDoc.GetElement(kvp.Value) as View;
+                        if (srcV != null && tgtV != null)
+                        {
+                            result.Warnings.Add(
+                                $"View map: '{srcV.Name}' (src {kvp.Key.IntegerValue}) "
+                                + $"→ '{tgtV.Name}' (tgt {kvp.Value.IntegerValue})");
+                        }
+                    }
                     tg.Assimilate();
                 }
                 catch (Exception ex)
