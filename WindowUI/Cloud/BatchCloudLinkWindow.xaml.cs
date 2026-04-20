@@ -16,25 +16,27 @@ namespace HMVTools
         private bool _isSelected;
         private string _placement = "Shared Coordinates";
         private string _status = "Not Linked";
+        private int _instanceCount = 0;
 
         public static readonly string[] PlacementOptions = new[]
         {
             "Shared Coordinates",
             "Origin to Origin",
-            "Center to Center"
+            "Project Base Point"
         };
+
+        // 1. PERFECT INSTANCE COUNT WITH UI TRIGGER
+        public int InstanceCount
+        {
+            get => _instanceCount;
+            set { _instanceCount = value; OnPropertyChanged(nameof(InstanceCount)); }
+        }
 
         public bool IsSelected
         {
             get => _isSelected;
             set { _isSelected = value; OnPropertyChanged(nameof(IsSelected)); }
         }
-
-        public string Name { get; set; }
-        public string FolderPath { get; set; }
-        public string Urn { get; set; }
-        public int LinkTypeElementId { get; set; }
-
 
         public string Status
         {
@@ -47,6 +49,12 @@ namespace HMVTools
             get => _placement;
             set { _placement = value; OnPropertyChanged(nameof(Placement)); }
         }
+
+        // Standard properties that don't change during the window's lifecycle
+        public string Name { get; set; }
+        public string FolderPath { get; set; }
+        public string Urn { get; set; }
+        public int LinkTypeElementId { get; set; }
 
         public string[] GetPlacementOptions() => PlacementOptions;
 
@@ -85,12 +93,15 @@ namespace HMVTools
                     Urn = f.Urn,
                     IsSelected = false,
                     Status = f.Status,
-                    LinkTypeElementId = f.LinkTypeElementId
+                    LinkTypeElementId = f.LinkTypeElementId,
+                    InstanceCount = f.InstanceCount
                 };
                 row.PropertyChanged += Row_PropertyChanged;
+
                 FileRows.Add(row);
             }
-
+            // Shift-click support
+            FileGrid.PreviewMouseLeftButtonDown += FileGrid_ShiftClick;
             // Apply row colors after grid is loaded
             FileGrid.LoadingRow += FileGrid_LoadingRow;
 
@@ -155,8 +166,8 @@ namespace HMVTools
                     "HMV Tools");
                 return;
             }
+            ReadyToLink = true;
             DialogResult = true;
-            Close();
         }
 
         private void FileGrid_LoadingRow(object sender, System.Windows.Controls.DataGridRowEventArgs e)
@@ -185,6 +196,8 @@ namespace HMVTools
         /// </summary>
         public List<RvtFileRow> ReloadFiles { get; private set; }
         public bool IsReloadAction { get; private set; } = false;
+        public bool ReadyToLink { get; set; } = false;
+        public bool ReadyToReload { get; set; } = false;
 
         private void ReloadSelected_Click(object sender, RoutedEventArgs e)
         {
@@ -199,8 +212,8 @@ namespace HMVTools
             }
 
             IsReloadAction = true;
+            ReadyToReload = true;
             DialogResult = true;
-            Close();
         }
         private void SearchBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
@@ -218,6 +231,72 @@ namespace HMVTools
                 FileGrid.ItemsSource = filtered;
             }
         }
+        /// <summary>
+        /// Updates a row's status after linking/reloading and resets selection flags.
+        /// Call this from the command after each operation cycle.
+        /// </summary>
+        public void RefreshAfterOperation()
+        {
+            ReadyToLink = false;
+            ReadyToReload = false;
+            IsReloadAction = false;
+            SelectedFiles = null;
+            ReloadFiles = null;
+
+            foreach (var row in FileRows)
+                row.IsSelected = false;
+
+            UpdateCount();
+            FileGrid.Items.Refresh();
+        }
+        private int _lastClickedIndex = -1;
+
+        private void FileGrid_ShiftClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // Check if Shift is held
+            if ((System.Windows.Input.Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) == 0)
+            {
+                // No shift — just track the index
+                var row = GetRowFromClick(e);
+                if (row != null)
+                    _lastClickedIndex = FileRows.IndexOf(row);
+                return;
+            }
+
+            var clickedRow = GetRowFromClick(e);
+            if (clickedRow == null) return;
+
+            int clickedIndex = FileRows.IndexOf(clickedRow);
+            if (_lastClickedIndex < 0) _lastClickedIndex = 0;
+
+            int from = Math.Min(_lastClickedIndex, clickedIndex);
+            int to = Math.Max(_lastClickedIndex, clickedIndex);
+
+            bool newState = !clickedRow.IsSelected;
+            for (int i = from; i <= to; i++)
+                FileRows[i].IsSelected = newState;
+
+            e.Handled = true;
+        }
+
+        private RvtFileRow GetRowFromClick(System.Windows.Input.MouseButtonEventArgs e)
+        {
+            var dep = (DependencyObject)e.OriginalSource;
+            while (dep != null && !(dep is System.Windows.Controls.DataGridRow))
+                dep = System.Windows.Media.VisualTreeHelper.GetParent(dep);
+
+            if (dep is System.Windows.Controls.DataGridRow gridRow)
+                return gridRow.Item as RvtFileRow;
+            return null;
+        }
+
+        public void UpdateRowStatus(string fileName, string newStatus)
+        {
+            var row = FileRows.FirstOrDefault(r =>
+                string.Equals(r.Name, fileName, StringComparison.OrdinalIgnoreCase));
+            if (row != null)
+                row.Status = newStatus;
+        }
         private void TopBar_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
         {
             if (e.ChangedButton == System.Windows.Input.MouseButton.Left)
@@ -225,6 +304,9 @@ namespace HMVTools
         }
         private void Cancel_Click(object sender, RoutedEventArgs e)
         {
+            ReadyToLink = false;
+            ReadyToReload = false;
+            IsReloadAction = false;
             DialogResult = false;
             Close();
         }

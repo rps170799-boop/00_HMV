@@ -27,6 +27,7 @@ namespace HMVTools
         public string Path { get; set; }
         public string Status { get; set; }
         public int LinkTypeElementId { get; set; }
+        public int InstanceCount { get; set; } = 0;
 
     }
 

@@ -125,6 +125,7 @@
                                 Binding="{Binding Name}"
                                 IsReadOnly="True"
                                 Width="*"/>
+                            <DataGridTextColumn Header="Instances" Binding="{Binding InstanceCount}" Width="80" IsReadOnly="True" />
                             <DataGridTextColumn Header="Folder"
                                 Binding="{Binding FolderPath}"
                                 IsReadOnly="True"
