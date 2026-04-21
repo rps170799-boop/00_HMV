@@ -1,0 +1,112 @@
+<Window x:Class="HMVTools.ConexionFlexPipeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - FlexPipe DXF Connection"
+        Height="467" Width="400"
+        WindowStyle="None" 
+        AllowsTransparency="False" 
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="White"
+        FontFamily="Roboto, Arial, Segoe UI">
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="60"/>
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White" Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="40"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" - Connections from .dxf" Foreground="White" FontSize="10" Margin="5,2,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+                
+                <Button Grid.Column="1" Content="✕" FontSize="12" Foreground="White" 
+                        Background="Transparent" BorderThickness="0" Cursor="Hand" 
+                        Click="BtnClose_Click"/>
+            </Grid>
+
+            <StackPanel Grid.Row="1" Margin="20,15,20,10">
+
+                <TextBlock Text="1. DXF Trajectory File" FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="60"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="txtDxfPath" Height="24" FontSize="10" VerticalContentAlignment="Center" IsReadOnly="True" Padding="4,0"/>
+                    <Button Grid.Column="1" Content="Browse" FontSize="10" Height="24" Margin="5,0,0,0"
+                            Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnBrowse_Click"/>
+                </Grid>
+
+                <TextBlock Text="2. Select Equipments" FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="60"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="lblElementA" Text="Element A (Start): Not selected" FontSize="10" Foreground="#1E1E1E" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="Pick A" FontSize="10" Height="24" 
+                            Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnPickA_Click"/>
+                </Grid>
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="60"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="lblElementB" Text="Element B (End): Not selected" FontSize="10" Foreground="#1E1E1E" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="Pick B" FontSize="10" Height="24" 
+                            Background="#004982" Foreground="White" BorderThickness="0" Cursor="Hand" Click="BtnPickB_Click"/>
+                </Grid>
+
+                <TextBlock Text="3. FlexPipe Configuration" FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <ComboBox x:Name="cmbFlexPipeType" Height="24" FontSize="10" Margin="0,0,0,8" DisplayMemberPath="Name"/>
+
+                <TextBlock Text="Electrical System Type" FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <ComboBox x:Name="cmbSystemType" Height="24" FontSize="10" Margin="0,0,0,12" DisplayMemberPath="Name"/>
+
+                <TextBlock Text="4. DXF Target Parameter (Shared/Project)" FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBox x:Name="txtParamName" Text="DXF_Source" Height="24" FontSize="10" VerticalContentAlignment="Center" Padding="4,0"/>
+
+                <TextBlock x:Name="txtStatus" Text="Ready." FontSize="10" Foreground="#004982" FontWeight="SemiBold" Margin="0,15,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                        VerticalAlignment="Center" Margin="0,0,20,0">
+                <Button Content="Cancel" FontSize="10" Height="30" Width="80"
+                        Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0"
+                        Cursor="Hand" Margin="0,0,10,0" Click="BtnClose_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+
+                <Button Content="Generate FlexPipe" FontSize="10" FontWeight="Bold"
+                        Height="30" Width="120" Background="#E9AA00" Foreground="White"
+                        BorderThickness="0" Cursor="Hand" Click="BtnRun_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

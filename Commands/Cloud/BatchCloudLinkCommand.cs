@@ -348,7 +348,7 @@ namespace HMVTools
                             }
                             catch { }
 
-                            RefreshUIStatusOnly(doc, window.FileRows);
+                            RefreshUIStatusOnly(doc, rvtFiles, window.FileRows);
 
                             window.RefreshAfterOperation();
                             continue;
@@ -373,7 +373,7 @@ namespace HMVTools
         }
 
 
-        private void RefreshUIStatusOnly(Document doc, IEnumerable<RvtFileRow> uiRows)
+        private void RefreshUIStatusOnly(Document doc, List<CloudRevitFile> rvtFiles, IEnumerable<RvtFileRow> uiRows)
         {
             // 1. Count all physical link instances
             var instanceCounts = new Dictionary<ElementId, int>();
@@ -396,25 +396,49 @@ namespace HMVTools
                 .Cast<RevitLinkType>()
                 .ToList();
 
-            // 3. Update UI Rows using Fuzzy Matching
-            foreach (var row in uiRows)
+            var typeMap = new Dictionary<string, (int Id, string Status, int Count)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var lt in linkTypes)
             {
-                string rowNameNoExt = System.IO.Path.GetFileNameWithoutExtension(row.Name);
+                string status = "Unloaded";
+                try { status = RevitLinkType.IsLoaded(doc, lt.Id) ? "Loaded" : "Unloaded"; } catch { }
+                int count = instanceCounts.ContainsKey(lt.Id) ? instanceCounts[lt.Id] : 0;
 
-                // Fuzzy Match: Look for the exact name, OR see if the Revit Link Name contains the APS File Name
+                typeMap[lt.Name] = (lt.Id.IntegerValue, status, count);
+                typeMap[System.IO.Path.GetFileNameWithoutExtension(lt.Name)] = (lt.Id.IntegerValue, status, count);
+            }
+
+            // 3. UPDATE THE DATABASE (rvtFiles) so new windows get the correct data
+            foreach (var f in rvtFiles)
+            {
+                string rowNameNoExt = System.IO.Path.GetFileNameWithoutExtension(f.Name);
                 var matchingType = linkTypes.FirstOrDefault(lt =>
-                    lt.Name.Equals(row.Name, StringComparison.OrdinalIgnoreCase) ||
+                    lt.Name.Equals(f.Name, StringComparison.OrdinalIgnoreCase) ||
                     lt.Name.IndexOf(rowNameNoExt, StringComparison.OrdinalIgnoreCase) >= 0);
 
                 if (matchingType != null)
                 {
-                    string status = "Unloaded";
-                    try { status = RevitLinkType.IsLoaded(doc, matchingType.Id) ? "Loaded" : "Unloaded"; }
-                    catch { }
+                    f.Status = typeMap.ContainsKey(matchingType.Name) ? typeMap[matchingType.Name].Status : "Loaded";
+                    f.LinkTypeElementId = matchingType.Id.IntegerValue;
+                    f.InstanceCount = instanceCounts.ContainsKey(matchingType.Id) ? instanceCounts[matchingType.Id] : 0;
+                }
+            }
 
-                    row.Status = status;
-                    row.LinkTypeElementId = matchingType.Id.IntegerValue;
-                    row.InstanceCount = instanceCounts.ContainsKey(matchingType.Id) ? instanceCounts[matchingType.Id] : 0;
+            // 4. Update the visual rows (just in case)
+            if (uiRows != null)
+            {
+                foreach (var row in uiRows)
+                {
+                    string rowNameNoExt = System.IO.Path.GetFileNameWithoutExtension(row.Name);
+                    var matchingType = linkTypes.FirstOrDefault(lt =>
+                        lt.Name.Equals(row.Name, StringComparison.OrdinalIgnoreCase) ||
+                        lt.Name.IndexOf(rowNameNoExt, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                    if (matchingType != null)
+                    {
+                        row.Status = typeMap.ContainsKey(matchingType.Name) ? typeMap[matchingType.Name].Status : "Loaded";
+                        row.LinkTypeElementId = matchingType.Id.IntegerValue;
+                        row.InstanceCount = instanceCounts.ContainsKey(matchingType.Id) ? instanceCounts[matchingType.Id] : 0;
+                    }
                 }
             }
         }

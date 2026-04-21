@@ -203,23 +203,19 @@ namespace HMVTools
         {
             if (el == null) return "N/A";
             Parameter p = el.get_Parameter(bip);
-            if (p == null) return "N/A";
+            if (p == null || !p.HasValue) return "N/A";
 
-            // Try display string first
-            if (p.HasValue)
+            // ALWAYS read as double for coordinate params to preserve full precision
+            if (p.StorageType == StorageType.Double)
             {
-                string vs = p.AsValueString();
-                if (!string.IsNullOrEmpty(vs)) return vs;
-
-                // Fallback: read as double and format in document units
-                if (p.StorageType == StorageType.Double)
-                {
-                    double feet = p.AsDouble();
-                    double meters = feet * 0.3048;
-                    return meters.ToString("F10") + " m";
-                }
+                double feet = p.AsDouble();
+                double meters = feet * 0.3048;
+                return meters.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + " m";
             }
-            return "N/A";
+
+            // Fallback for non-double params
+            string vs = p.AsValueString();
+            return !string.IsNullOrEmpty(vs) ? vs : "N/A";
         }
     }
 

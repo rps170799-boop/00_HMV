@@ -554,6 +554,25 @@ namespace HMVTools
             if (iconLCF != null) btnLCF.LargeImage = iconLCF;
 
 
+            // ── Electrical Tools Panel ──
+            RibbonPanel panelElect = app.CreateRibbonPanel("HMV Tools", "Electrical");
+
+            PushButtonData btnElectConect = new PushButtonData(
+                "ElectricConect",
+                "Electrical\n Connect",
+                path,
+                "HMVTools.ElectricalConnectionCommand");
+            btnElectConect.ToolTip = "Generate the electrical connection from a path .dxf";
+            btnElectConect.LongDescription =
+                  "Extracts path and coordinate information from a .dxf file:\n\n"
+                    + "• Select the .dxf file\n"
+                    + "• Pick connector A and connector B\n"
+                    + "• Select the flex pipe Type.\n"
+                    + "• Put the .dxf name inside a parameter\n"
+                    + "After this we have the option to refresh the path.";
+            PushButton btnElc = panelElect.AddItem(btnElectConect) as PushButton;
+            BitmapImage iconElc = LoadImage("HMVTools.Resources.electricalconect_32.png");
+            if (iconElc != null) btnElc.LargeImage = iconElc;
 
             // ══════════════════════════════════════════════════════
             //  PROACTIVE TRACKING — Event subscriptions

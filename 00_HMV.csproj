@@ -58,6 +58,9 @@
     <Reference Include="ExcelNumberFormat, Version=1.1.0.0, Culture=neutral, PublicKeyToken=23c6f5d73be07eca, processorArchitecture=MSIL">
       <HintPath>packages\ExcelNumberFormat.1.1.0\lib\net20\ExcelNumberFormat.dll</HintPath>
     </Reference>
+    <Reference Include="IxMilia.Dxf, Version=0.8.4.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>packages\IxMilia.Dxf.0.8.4\lib\netstandard2.0\IxMilia.Dxf.dll</HintPath>
+    </Reference>
     <Reference Include="Microsoft.Bcl.Cryptography, Version=10.0.0.6, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\Microsoft.Bcl.Cryptography.10.0.6\lib\net462\Microsoft.Bcl.Cryptography.dll</HintPath>
     </Reference>
@@ -114,6 +117,9 @@
     <Reference Include="System.Security.Cryptography.Xml, Version=10.0.0.6, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.Security.Cryptography.Xml.10.0.6\lib\net462\System.Security.Cryptography.Xml.dll</HintPath>
     </Reference>
+    <Reference Include="System.Text.Encoding.CodePages, Version=5.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>packages\System.Text.Encoding.CodePages.5.0.0\lib\net461\System.Text.Encoding.CodePages.dll</HintPath>
+    </Reference>
     <Reference Include="System.ValueTuple" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xaml" />
@@ -131,6 +137,7 @@
     <Compile Include="Commands\Annotation\AutoDimensionWindow.cs" />
     <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
     <Compile Include="Commands\Cloud\BatchCloudLinkCommand.cs" />
+    <Compile Include="Commands\Electrical\ElectricalConnectionCommand.cs" />
     <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
@@ -183,6 +190,9 @@
     </Compile>
     <Compile Include="WindowUI\DWG\Dwg3DProgressWindow.xaml.cs">
       <DependentUpon>Dwg3DProgressWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Electrical\ConexionFlexPipeWindow.xaml.cs">
+      <DependentUpon>ConexionFlexPipeWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.xaml.cs">
       <DependentUpon>ConstraintsReleaseWindow.xaml</DependentUpon>
@@ -271,6 +281,10 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="WindowUI\Electrical\ConexionFlexPipeWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -286,6 +300,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\electricalconect_32.png" />
     <EmbeddedResource Include="Resources\linkcloud_32.png" />
     <EmbeddedResource Include="Resources\transfer_units_32.png" />
     <EmbeddedResource Include="Resources\autodim_32.png" />
