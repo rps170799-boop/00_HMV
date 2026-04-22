@@ -54,6 +54,7 @@ namespace HMVTools
             }
 
             var viewEntries = CollectTransferableViews(srcDoc);
+            var sheetEntries = CollectTransferableSheets(srcDoc);
 
             // ═══════════════════════════════════════════════════
             //  3. SHOW WINDOW
@@ -63,7 +64,8 @@ namespace HMVTools
                 srcDoc.Title,
                 selectedIds != null ? selectedIds.Count : 0,
                 openDocs,
-                viewEntries);
+                viewEntries,
+                sheetEntries);
 
             if (win.ShowDialog() != true || win.Settings == null)
                 return Result.Cancelled;
@@ -136,7 +138,7 @@ namespace HMVTools
                             srcDoc, tgtDoc, selectedIds,
                             coordTransform, result);
 
-                    // ── 5c. Copy views (doc-to-doc) ────────────
+                    // ── 5b. Copy views (doc-to-doc) ────────────
                     var viewIdsToCopy = settings.SelectedViewIds
                         .Select(id => new ElementId(id))
                         .ToList();
@@ -145,7 +147,8 @@ namespace HMVTools
                         TransferManager.CopyViews(
                             srcDoc, tgtDoc,
                             viewIdsToCopy,
-                            coordTransform, result);
+                            coordTransform, result,
+                            settings.TransferMode);
 
                     // ── 5c. Copy & assign view templates ───────
                     if (viewMap.Count > 0)
@@ -166,7 +169,27 @@ namespace HMVTools
                             srcDoc, tgtDoc, viewMap, result);
                     }
 
-                    // ── 5d. Reference markers (informational) ──
+                    // ── 5f. Copy sheets ────────────────────────
+                    var sheetIdsToCopy = settings.SelectedSheetIds
+                        .Select(id => new ElementId(id))
+                        .ToList();
+
+                    if (sheetIdsToCopy.Count > 0)
+                    {
+                        Dictionary<ElementId, ElementId> sheetMap =
+                            TransferManager.CopySheets(
+                                srcDoc, tgtDoc,
+                                sheetIdsToCopy,
+                                coordTransform,
+                                result,
+                                settings);
+
+                        // Templates and overrides for views
+                        // created during sheet viewport copy
+                        // are handled inside CopySheets already.
+                    }
+
+                    // ── 5g. Reference markers (informational) ──
                     if (settings.IncludeRefMarkers)
                     {
                         foreach (var kvp in viewMap)
@@ -230,8 +253,8 @@ namespace HMVTools
         }
 
         // ═══════════════════════════════════════════════════════
-
-
+        //  COLLECT TRANSFERABLE VIEWS (now includes Legends)
+        // ═══════════════════════════════════════════════════════
 
         private List<ViewEntry> CollectTransferableViews(Document doc)
         {
@@ -277,6 +300,35 @@ namespace HMVTools
                     Id = v.Id.IntegerValue,
                     Name = v.Name,
                     Category = category
+                });
+            }
+
+            return entries;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        //  COLLECT TRANSFERABLE SHEETS
+        // ═══════════════════════════════════════════════════════
+
+        private List<SheetEntry> CollectTransferableSheets(
+            Document doc)
+        {
+            var entries = new List<SheetEntry>();
+
+            var sheets = new FilteredElementCollector(doc)
+                .OfClass(typeof(ViewSheet))
+                .Cast<ViewSheet>()
+                .OrderBy(s => s.SheetNumber);
+
+            foreach (ViewSheet s in sheets)
+            {
+                entries.Add(new SheetEntry
+                {
+                    Id = s.Id.IntegerValue,
+                    SheetNumber = s.SheetNumber,
+                    SheetName = s.Name,
+                    ViewportCount = s.GetAllViewports().Count,
+                    IsPlaceholder = s.IsPlaceholder
                 });
             }
 

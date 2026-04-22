@@ -42,35 +42,28 @@
                         Click="BtnClose_Click"/>
             </Grid>
 
-            <!-- ══ Body ══ -->
             <Grid Grid.Row="1" Margin="20,14,20,10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <!-- 0: source info -->
                     <RowDefinition Height="Auto"/>
-                    <!-- 1: target doc label+combo -->
                     <RowDefinition Height="Auto"/>
-                    <!-- 2: views label -->
                     <RowDefinition Height="Auto"/>
-                    <!-- 3: search box -->
                     <RowDefinition Height="*"/>
-                    <!-- 4: view list -->
                     <RowDefinition Height="Auto"/>
-                    <!-- 5: options -->
                     <RowDefinition Height="Auto"/>
-                    <!-- 6: status -->
                 </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="15"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
-                <!-- 0: Source info accent bar -->
-                <Border Grid.Row="0" CornerRadius="6" Background="#E8F3FF"
-                        BorderBrush="#0078D4" BorderThickness="1"
-                        Padding="12,8" Margin="0,0,0,14">
-                    <TextBlock x:Name="txtSourceInfo" FontSize="11"
-                               Foreground="#004982"/>
+                <Border Grid.Row="0" Grid.ColumnSpan="3" CornerRadius="6" Background="#E8F3FF"
+                        BorderBrush="#0078D4" BorderThickness="1" Padding="12,8" Margin="0,0,0,14">
+                    <TextBlock x:Name="txtSourceInfo" FontSize="11" Foreground="#004982"/>
                 </Border>
 
-                <!-- 1: Target document -->
-                <StackPanel Grid.Row="1" Margin="0,0,0,12">
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,0,0,12">
                     <TextBlock Text="Target Document:" FontSize="11" FontWeight="SemiBold"
                                Foreground="#1E1E1E" Margin="0,0,0,4"/>
                     <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White">
@@ -80,43 +73,49 @@
                     </Border>
                 </StackPanel>
 
-                <!-- 2: Views label -->
-                <TextBlock Grid.Row="2" Text="Views to Transfer:" FontSize="11"
-                           FontWeight="SemiBold" Foreground="#1E1E1E"
-                           Margin="0,0,0,4"/>
+                <StackPanel Grid.Row="2" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,12">
+                    <TextBlock Text="View Transfer Mode:" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <RadioButton x:Name="rbCreate" Content="Create New (Duplicate)" IsChecked="True" FontSize="11" Foreground="#1E1E1E" Margin="0,0,15,0" VerticalAlignment="Center"/>
+                    <RadioButton x:Name="rbUpdate" Content="Update Existing (Clear &amp; Copy)" FontSize="11" Foreground="#1E1E1E" VerticalAlignment="Center"/>
+                </StackPanel>
 
-                <!-- 3: Search box -->
-                <Border Grid.Row="3" CornerRadius="6" BorderBrush="#C8C8D2"
-                        BorderThickness="1" Background="White" Margin="0,0,0,6">
-                    <TextBox x:Name="viewSearchBox" Height="26" FontSize="11"
-                             BorderThickness="0" Background="Transparent"
-                             Padding="8,4" VerticalContentAlignment="Center"
-                             TextChanged="ViewSearchBox_TextChanged"/>
-                </Border>
+                <StackPanel Grid.Row="3" Grid.Column="0">
+                    <TextBlock Text="Views to Transfer:" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <Border CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" Margin="0,0,0,6">
+                        <TextBox x:Name="viewSearchBox" Height="26" FontSize="11"
+                                 BorderThickness="0" Background="Transparent" Padding="8,4" 
+                                 VerticalContentAlignment="Center" TextChanged="ViewSearchBox_TextChanged"/>
+                    </Border>
+                </StackPanel>
 
-                <!-- 4: View list (scrollable) -->
-                <Border Grid.Row="4" CornerRadius="6" BorderBrush="#C8C8D2"
-                        BorderThickness="1" Background="White" Margin="0,0,0,12">
+                <StackPanel Grid.Row="3" Grid.Column="2">
+                    <TextBlock Text="Sheets to Transfer:" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <Border Height="26" Margin="0,0,0,6"/>
+                </StackPanel>
+
+                <Border Grid.Row="4" Grid.Column="0" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" Margin="0,0,0,12">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="viewListPanel" Margin="6"/>
                     </ScrollViewer>
                 </Border>
 
-                <!-- 5: Options -->
-                <StackPanel Grid.Row="5" Margin="0,0,0,6">
-                    <CheckBox x:Name="chkAnnotations"
-                              Content="Include view-specific annotations (2-step copy)"
-                              IsChecked="True" FontSize="11" FontWeight="SemiBold"
-                              Foreground="#1E1E1E" Margin="0,0,0,4"/>
-                    <CheckBox x:Name="chkRefMarkers"
-                              Content="Identify reference markers for manual recreation"
-                              IsChecked="True" FontSize="11" FontWeight="SemiBold"
-                              Foreground="#1E1E1E"/>
+                <Border Grid.Row="4" Grid.Column="2" CornerRadius="6" BorderBrush="#C8C8D2" BorderThickness="1" Background="White" Margin="0,0,0,12">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="sheetListPanel" Margin="6"/>
+                    </ScrollViewer>
+                </Border>
+
+                <StackPanel Grid.Row="5" Grid.Column="0" Margin="0,0,0,6">
+                    <CheckBox x:Name="chkAnnotations" Content="Include view-specific annotations" IsChecked="True" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <CheckBox x:Name="chkRefMarkers" Content="Identify reference markers" IsChecked="True" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E"/>
                 </StackPanel>
 
-                <!-- 6: Status line -->
-                <TextBlock Grid.Row="6" x:Name="statusText" FontSize="10"
-                           Foreground="#787882" Margin="0,6,0,0"/>
+                <StackPanel Grid.Row="5" Grid.Column="2" Margin="0,0,0,6">
+                    <CheckBox x:Name="chkCopyViewports" Content="Copy viewports to sheets" IsChecked="True" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E" Margin="0,0,0,4"/>
+                    <CheckBox x:Name="chkCopyTitleblocks" Content="Copy titleblocks" IsChecked="True" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="6" Grid.ColumnSpan="3" x:Name="statusText" FontSize="10" Foreground="#787882" Margin="0,6,0,0"/>
             </Grid>
 
             <!-- ══ Footer buttons ══ -->

@@ -18,6 +18,8 @@ namespace HMVTools
 
         private readonly List<OpenDocEntry> _openDocs;
         private readonly List<ViewEntry> _sourceViews;
+        private readonly List<SheetEntry> _sourceSheets;
+        private readonly Dictionary<int, CheckBox> _sheetCheckBoxes = new Dictionary<int, CheckBox>();
         private readonly string _sourceTitle;
         private readonly int _elementCount;
 
@@ -30,7 +32,8 @@ namespace HMVTools
             string sourceDocTitle,
             int selectedElementCount,
             List<OpenDocEntry> targetDocs,
-            List<ViewEntry> views)
+            List<ViewEntry> views,
+            List<SheetEntry> sheets)
         {
             InitializeComponent();
 
@@ -38,6 +41,7 @@ namespace HMVTools
             _elementCount = selectedElementCount;
             _openDocs = targetDocs ?? new List<OpenDocEntry>();
             _sourceViews = views ?? new List<ViewEntry>();
+            _sourceSheets = sheets ?? new List<SheetEntry>();
 
             // Source info line
             txtSourceInfo.Text = _elementCount > 0
@@ -50,6 +54,54 @@ namespace HMVTools
 
             // Populate view list
             PopulateViewList();
+            PopulateSheetList();
+            UpdateStatus();
+        }
+        private void PopulateSheetList()
+        {
+            // Ensure the XAML has a container named sheetListPanel
+            if (sheetListPanel == null) return;
+
+            sheetListPanel.Children.Clear();
+            _sheetCheckBoxes.Clear();
+
+            // Create a "Select All" header for the sheets
+            var header = new CheckBox
+            {
+                IsChecked = false,
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(SectionHead),
+                Margin = new Thickness(2, 6, 0, 2),
+                Content = $"  All Sheets  ({_sourceSheets.Count})"
+            };
+            header.Checked += (sender, e) => SetSheets(true);     // <--- Changed s to sender
+            header.Unchecked += (sender, e) => SetSheets(false);  // <--- Changed s to sender
+            sheetListPanel.Children.Add(header);
+
+            // Populate individual sheet checkboxes
+            foreach (var s in _sourceSheets.OrderBy(x => x.SheetNumber))
+            {
+                var cb = new CheckBox
+                {
+                    Content = $"  {s.SheetNumber} - {s.SheetName}",
+                    Tag = s.Id,
+                    FontSize = 11,
+                    Margin = new Thickness(20, 2, 0, 2),
+                    Foreground = new SolidColorBrush(DarkText)
+                };
+                cb.Checked += (sender, e) => UpdateStatus();     // <--- Changed s to sender
+                cb.Unchecked += (sender, e) => UpdateStatus();   // <--- Changed s to sender
+
+                _sheetCheckBoxes[s.Id] = cb;
+                sheetListPanel.Children.Add(cb);
+            }
+        }
+
+        private void SetSheets(bool val)
+        {
+            foreach (var cb in _sheetCheckBoxes.Values)
+                cb.IsChecked = val;
             UpdateStatus();
         }
 
@@ -208,12 +260,24 @@ namespace HMVTools
             Settings = new MigrationSettings
             {
                 TargetDocIndex = targetDocCombo.SelectedIndex,
-                SelectedViewIds = _viewCheckBoxes
-                    .Where(kv => kv.Value.IsChecked == true)
-                    .Select(kv => kv.Key)
-                    .ToList(),
+
+                SelectedViewIds = _viewCheckBoxes.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList(),
+                SelectedSheetIds = _sheetCheckBoxes.Where(kv => kv.Value.IsChecked == true).Select(kv => kv.Key).ToList(),
+
                 IncludeAnnotations = chkAnnotations.IsChecked == true,
-                IncludeRefMarkers = chkRefMarkers.IsChecked == true
+                IncludeRefMarkers = chkRefMarkers.IsChecked == true,
+
+                // Map the new RadioButton
+                TransferMode = (rbUpdate?.IsChecked == true)
+        ? ViewTransferMode.Update
+        : ViewTransferMode.Create,
+
+                // Map the new checkboxes into the SheetOptions object
+                SheetOptions = new SheetCopyOptions
+                {
+                    CopyViewports = chkCopyViewports.IsChecked == true,
+                    CopyTitleblock = chkCopyTitleblocks.IsChecked == true
+                }
             };
 
             DialogResult = true;

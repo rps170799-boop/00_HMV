@@ -22,6 +22,10 @@ namespace HMVTools
     {
         public int ElementsCopied { get; set; }
         public int ViewsCreated { get; set; }
+        public int ViewsUpdated { get; set; }
+        public int SheetsCreated { get; set; }
+        public int SheetsUpdated { get; set; }
+        public int ViewportsCopied { get; set; }
         public int TemplatesRemapped { get; set; }
         public int RefMarkersNoted { get; set; }
         public int AnnotationsCopied { get; set; }
@@ -34,9 +38,14 @@ namespace HMVTools
             sb.AppendLine("═══  MIGRATION REPORT  ═══");
             sb.AppendLine();
             sb.AppendLine($"  Model elements copied:    {ElementsCopied}");
-            sb.AppendLine($"  Views transferred:        {ViewsCreated}");
+            sb.AppendLine($"  Views created:            {ViewsCreated}");
+            sb.AppendLine($"  Views updated:            {ViewsUpdated}");
+            sb.AppendLine($"  Sheets created:           {SheetsCreated}");
+            sb.AppendLine($"  Sheets updated:           {SheetsUpdated}");
+            sb.AppendLine($"  Viewports placed:         {ViewportsCopied}");
             sb.AppendLine($"  Templates remapped:       {TemplatesRemapped}");
             sb.AppendLine($"  Ref markers identified:   {RefMarkersNoted}");
+            sb.AppendLine($"  Annotations copied:       {AnnotationsCopied}");
 
             if (Warnings.Count > 0)
             {
@@ -165,6 +174,7 @@ namespace HMVTools
 
         // ═══════════════════════════════════════════════════════
         //  3. COPY VIEWS (DOCUMENT-TO-DOCUMENT)
+        //     Now supports Create vs Update mode.
         // ═══════════════════════════════════════════════════════
 
         public static Dictionary<ElementId, ElementId> CopyViews(
@@ -172,7 +182,8 @@ namespace HMVTools
             Document target,
             ICollection<ElementId> viewIds,
             Transform coordTransform,
-            TransferResult result)
+            TransferResult result,
+            ViewTransferMode mode = ViewTransferMode.Create)
         {
             var viewMap = new Dictionary<ElementId, ElementId>();
             if (viewIds == null || viewIds.Count == 0)
@@ -223,7 +234,7 @@ namespace HMVTools
                 CopyViewBatch(source, target,
                     spatialIds, coordTransform,
                     opts, viewMap, result,
-                    "Plan/Section/Elevation");
+                    "Plan/Section/Elevation", mode);
             }
 
             if (flatIds.Count > 0)
@@ -231,28 +242,28 @@ namespace HMVTools
                 CopyViewBatch(source, target,
                     flatIds, Transform.Identity,
                     opts, viewMap, result,
-                    "Drafting/Legend");
+                    "Drafting/Legend", mode);
             }
 
             return viewMap;
         }
 
         private static void CopyViewBatch(
-     Document source,
-     Document target,
-     List<ElementId> ids,
-     Transform transform,
-     CopyPasteOptions opts,
-     Dictionary<ElementId, ElementId> viewMap,
-     TransferResult result,
-     string batchLabel)
+            Document source,
+            Document target,
+            List<ElementId> ids,
+            Transform transform,
+            CopyPasteOptions opts,
+            Dictionary<ElementId, ElementId> viewMap,
+            TransferResult result,
+            string batchLabel,
+            ViewTransferMode mode = ViewTransferMode.Create)
         {
             using (var t = new Transaction(target,
                 $"HMV – Copy {batchLabel} Views"))
             {
                 t.Start();
 
-                // Snapshot existing views to detect "fake" copies
                 var existingViewIds = new HashSet<int>(
                     new FilteredElementCollector(target)
                         .OfClass(typeof(View))
@@ -260,11 +271,6 @@ namespace HMVTools
                 int batchSuccesses = 0;
                 int failures = 0;
 
-                // Copy one view at a time so the source→target pairing is
-                // unambiguous (CopyElements does NOT guarantee return order
-                // matches input order). Each view is wrapped in its own
-                // SubTransaction so a single failure doesn't poison the
-                // parent transaction or kill the rest of the batch.
                 foreach (var srcId in ids)
                 {
                     string viewName = "(unknown)";
@@ -276,15 +282,47 @@ namespace HMVTools
                     }
                     catch { }
 
-                    // Pre-check: use ForceCreate for all spatial views
-                    // when the target already has matching content.
-                    // CopyElements is unreliable for Plans (returns
-                    // existing view) and Sections (misplaces origin).
+                    // ── UPDATE MODE: find existing, clear, recopy ──
+                    if (mode == ViewTransferMode.Update)
+                    {
+                        View existing = FindMatchingView(target, srcV);
+                        if (existing != null)
+                        {
+                            using (var sub = new SubTransaction(target))
+                            {
+                                try
+                                {
+                                    sub.Start();
+                                    ClearViewContents(target, existing,
+                                        new SheetCopyOptions());
+                                    CopyViewContentsViewToView(
+                                        source, srcV, target, existing,
+                                        new SheetCopyOptions());
+                                    CopyViewProperties(srcV, existing);
+                                    viewMap[srcId] = existing.Id;
+                                    result.ViewsUpdated++;
+                                    batchSuccesses++;
+                                    sub.Commit();
+                                }
+                                catch (Exception ex)
+                                {
+                                    try { if (sub.HasStarted() && !sub.HasEnded()) sub.RollBack(); } catch { }
+                                    failures++;
+                                    result.Warnings.Add(
+                                        $"Update failed for '{viewName}': {ex.Message}");
+                                }
+                            }
+                            continue;
+                        }
+                        // If no match found in Update mode, fall through
+                        // to create a new view below.
+                    }
+
+                    // ── CREATE MODE (or no match in Update) ───────
                     bool needsForcePath = false;
 
                     if (srcV is ViewPlan srcPlan && srcPlan.GenLevel != null)
                     {
-                        // Plans: force if level already exists
                         Level srcLev = source.GetElement(srcPlan.GenLevel.Id) as Level;
                         if (srcLev != null)
                         {
@@ -298,8 +336,6 @@ namespace HMVTools
                     }
                     else if (srcV is ViewSection)
                     {
-                        // Sections: always force — CopyElements
-                        // doesn't reliably transform the crop box
                         needsForcePath = true;
                     }
 
@@ -311,7 +347,6 @@ namespace HMVTools
 
                             if (needsForcePath)
                             {
-                                // Go straight to Duplicate — no CopyElements
                                 ElementId forced = ForceCreateView(
                                     source, target, srcId, result);
 
@@ -334,7 +369,6 @@ namespace HMVTools
                             }
                             else
                             {
-                                // Normal path: CopyElements
                                 var single = new List<ElementId> { srcId };
 
                                 ICollection<ElementId> copied =
@@ -349,7 +383,6 @@ namespace HMVTools
                                     if (existingViewIds.Contains(
                                             newId.IntegerValue))
                                     {
-                                        // Shouldn't happen but safety net
                                         sub.RollBack();
                                         failures++;
                                         result.Warnings.Add(
@@ -390,8 +423,6 @@ namespace HMVTools
                     }
                 }
 
-                // Commit whatever succeeded. We only fail the whole batch if
-                // literally nothing went through.
                 if (viewMap.Count > 0 || failures < ids.Count)
                 {
                     t.Commit();
@@ -404,12 +435,1147 @@ namespace HMVTools
                 }
             }
         }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  3b. VIEW MATCHING / CONTENT TRANSFER (pyRevit pattern)
+        // ═══════════════════════════════════════════════════════
+
         /// <summary>
-        /// Copies source view templates into the target document
-        /// and assigns them to the migrated views.
-        /// Duplicate names get Revit's automatic rename (e.g. "Template 1").
-        /// Each unique template is copied only once and reused.
+        /// Finds a view in the target document that matches by
+        /// ViewType and Name. For sheets, also matches SheetNumber.
+        /// Mirrors pyRevit find_matching_view.
         /// </summary>
+        public static View FindMatchingView(
+            Document target, View sourceView)
+        {
+            if (sourceView == null) return null;
+
+            foreach (View v in new FilteredElementCollector(target)
+                .OfClass(typeof(View))
+                .Cast<View>())
+            {
+                if (v.ViewType != sourceView.ViewType) continue;
+                if (v.Name != sourceView.Name) continue;
+
+                if (sourceView.ViewType == ViewType.DrawingSheet)
+                {
+                    var srcSheet = sourceView as ViewSheet;
+                    var tgtSheet = v as ViewSheet;
+                    if (srcSheet != null && tgtSheet != null
+                        && tgtSheet.SheetNumber == srcSheet.SheetNumber)
+                        return v;
+                }
+                else
+                {
+                    return v;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Collects all element IDs owned by a view, filtering out
+        /// viewports, extent elements, guide grids, and optionally
+        /// title blocks and schedules based on options.
+        /// Mirrors pyRevit get_view_contents.
+        /// </summary>
+        public static List<ElementId> GetViewContents(
+            Document doc, View view, SheetCopyOptions options)
+        {
+            var result = new List<ElementId>();
+
+            var elements = new FilteredElementCollector(doc, view.Id)
+                .WhereElementIsNotElementType()
+                .ToElements();
+
+            foreach (Element el in elements)
+            {
+                if (el == null) continue;
+
+                // Skip title blocks if option is off
+                if (el.Category != null
+                    && el.Category.Name == "Title Blocks"
+                    && !options.CopyTitleblock)
+                    continue;
+
+                // Skip schedules if option is off
+                if (el is ScheduleSheetInstance
+                    && !options.CopySchedules)
+                    continue;
+
+                // Always skip viewports and extent elements
+                if (el is Viewport) continue;
+                if (el.Name != null && el.Name.Contains("ExtentElem"))
+                    continue;
+
+                // Skip guide grids
+                if (el.Category != null
+                    && el.Category.Name.IndexOf("guide",
+                        StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
+
+                // Skip view references
+                if (el.Category != null
+                    && string.Equals(el.Category.Name, "views",
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                result.Add(el.Id);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Deletes all eligible contents from a destination view.
+        /// Mirrors pyRevit clear_view_contents.
+        /// </summary>
+        public static void ClearViewContents(
+            Document destDoc, View destView,
+            SheetCopyOptions options)
+        {
+            var ids = GetViewContents(destDoc, destView, options);
+
+            foreach (var id in ids)
+            {
+                try { destDoc.Delete(id); }
+                catch { /* element may be protected */ }
+            }
+        }
+
+        /// <summary>
+        /// Copies all view contents from source view to destination
+        /// view using the VIEW-TO-VIEW overload of CopyElements.
+        /// This is the key method that preserves dimensions, spot
+        /// elevations, text notes, detail lines, etc.
+        /// Mirrors pyRevit copy_view_contents.
+        /// </summary>
+        public static void CopyViewContentsViewToView(
+            Document sourceDoc, View sourceView,
+            Document destDoc, View destView,
+            SheetCopyOptions options)
+        {
+            var ids = GetViewContents(sourceDoc, sourceView, options);
+            if (ids.Count == 0) return;
+
+            var opts = new CopyPasteOptions();
+            opts.SetDuplicateTypeNamesHandler(
+                new UseDestinationTypesHandler());
+
+            // VIEW-TO-VIEW overload — this is what preserves
+            // all view-specific content (dimensions, spots, etc.)
+            ElementTransformUtils.CopyElements(
+                sourceView,
+                ids,
+                destView,
+                null,   // no additional transform
+                opts);
+        }
+
+        /// <summary>
+        /// Copies scale and view description from source to dest.
+        /// Mirrors pyRevit copy_view_props.
+        /// </summary>
+        public static void CopyViewProperties(
+            View sourceView, View destView)
+        {
+            try { destView.Scale = sourceView.Scale; } catch { }
+
+            try
+            {
+                var srcParam = sourceView.get_Parameter(
+                    BuiltInParameter.VIEW_DESCRIPTION);
+                var dstParam = destView.get_Parameter(
+                    BuiltInParameter.VIEW_DESCRIPTION);
+                if (srcParam != null && dstParam != null
+                    && !dstParam.IsReadOnly)
+                {
+                    dstParam.Set(srcParam.AsString() ?? "");
+                }
+            }
+            catch { }
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7. COPY SHEETS
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Top-level method that copies sheets from source to target.
+        /// For each sheet: creates or updates the sheet, then copies
+        /// viewports, schedules, title blocks, guide grids, revisions.
+        /// Mirrors pyRevit copy_sheet flow.
+        /// </summary>
+        public static Dictionary<ElementId, ElementId> CopySheets(
+            Document source,
+            Document target,
+            ICollection<ElementId> sheetIds,
+            Transform coordTransform,
+            TransferResult result,
+            MigrationSettings settings)
+        {
+            var sheetMap = new Dictionary<ElementId, ElementId>();
+            // Master view map: source viewId → target viewId
+            // Shared across sheets so a view placed on multiple
+            // sheets is only copied once.
+            var viewMap = new Dictionary<ElementId, ElementId>();
+
+            if (sheetIds == null || sheetIds.Count == 0)
+                return sheetMap;
+
+            var opts = settings.SheetOptions;
+
+            foreach (var srcSheetId in sheetIds)
+            {
+                ViewSheet srcSheet = source.GetElement(srcSheetId)
+                    as ViewSheet;
+                if (srcSheet == null)
+                {
+                    result.Warnings.Add(
+                        $"Sheet Id {srcSheetId.IntegerValue} "
+                        + "not found, skipped.");
+                    continue;
+                }
+
+                try
+                {
+                    ViewSheet destSheet = CopySingleSheet(
+                        source, target, srcSheet,
+                        coordTransform, viewMap,
+                        result, settings);
+
+                    if (destSheet != null)
+                        sheetMap[srcSheetId] = destSheet.Id;
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add(
+                        $"Sheet '{srcSheet.SheetNumber} - "
+                        + $"{srcSheet.Name}' failed: {ex.Message}");
+                }
+            }
+
+            return sheetMap;
+        }
+
+        /// <summary>
+        /// Copies or updates a single sheet.
+        /// Mirrors pyRevit copy_sheet.
+        /// </summary>
+        private static ViewSheet CopySingleSheet(
+            Document source, Document target,
+            ViewSheet srcSheet,
+            Transform coordTransform,
+            Dictionary<ElementId, ElementId> viewMap,
+            TransferResult result,
+            MigrationSettings settings)
+        {
+            var opts = settings.SheetOptions;
+            ViewTransferMode mode = settings.TransferMode;
+
+            // ── Check for existing sheet ──────────────────────
+            ViewSheet destSheet = FindMatchingView(
+                target, srcSheet) as ViewSheet;
+
+            if (destSheet != null)
+            {
+                if (mode == ViewTransferMode.Update)
+                {
+                    // Update existing: clear and recopy contents
+                    result.Warnings.Add(
+                        $"Sheet '{srcSheet.SheetNumber}' exists "
+                        + "in target — updating contents.");
+
+                    using (var t = new Transaction(target,
+                        "HMV – Update Sheet Contents"))
+                    {
+                        t.Start();
+                        ClearViewContents(target, destSheet, opts);
+                        CopyViewContentsViewToView(
+                            source, srcSheet, target, destSheet, opts);
+                        t.Commit();
+                    }
+                    result.SheetsUpdated++;
+                }
+                else
+                {
+                    // Create mode but sheet exists — skip content
+                    // copy, just report and proceed to viewports
+                    result.Warnings.Add(
+                        $"Sheet '{srcSheet.SheetNumber}' already "
+                        + "exists in target.");
+                }
+            }
+            else
+            {
+                // ── Create new sheet ──────────────────────────
+                using (var t = new Transaction(target,
+                    "HMV – Create Sheet"))
+                {
+                    t.Start();
+
+                    if (!srcSheet.IsPlaceholder
+                        || opts.PlaceholdersAsSheets)
+                    {
+                        destSheet = ViewSheet.Create(
+                            target, ElementId.InvalidElementId);
+                    }
+                    else
+                    {
+                        destSheet = ViewSheet.CreatePlaceholder(target);
+                    }
+
+                    try
+                    {
+                        destSheet.Name = srcSheet.Name;
+                        destSheet.SheetNumber = srcSheet.SheetNumber;
+                    }
+                    catch (Exception ex)
+                    {
+                        result.Warnings.Add(
+                            $"Could not set sheet name/number: "
+                            + ex.Message);
+                    }
+
+                    t.Commit();
+                }
+                result.SheetsCreated++;
+
+                // Copy sheet-level content (title block, schedules)
+                using (var t = new Transaction(target,
+                    "HMV – Copy Sheet Contents"))
+                {
+                    t.Start();
+                    CopyViewContentsViewToView(
+                        source, srcSheet, target, destSheet, opts);
+                    t.Commit();
+                }
+            }
+
+            if (destSheet == null) return null;
+
+            // ── Viewports ─────────────────────────────────────
+            if (!destSheet.IsPlaceholder && opts.CopyViewports)
+            {
+                CopySheetViewports(
+                    source, srcSheet,
+                    target, destSheet,
+                    coordTransform, viewMap,
+                    result, settings);
+            }
+
+            // ── Guide grids ──────────────────────────────────
+            if (!destSheet.IsPlaceholder && opts.CopyGuideGrids)
+            {
+                CopySheetGuides(
+                    source, srcSheet, target, destSheet, result);
+            }
+
+            // ── Revisions ────────────────────────────────────
+            if (opts.CopyRevisions)
+            {
+                CopySheetRevisions(
+                    source, srcSheet, target, destSheet, result);
+            }
+
+            return destSheet;
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7a. COPY SHEET VIEWPORTS
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Iterates source sheet viewports, copies/updates the
+        /// referenced view, then places it on the destination sheet
+        /// at the original position with matching viewport type,
+        /// detail number, label offset, and bounding-box correction.
+        /// Mirrors pyRevit copy_sheet_viewports.
+        /// </summary>
+        private static void CopySheetViewports(
+            Document source, ViewSheet srcSheet,
+            Document target, ViewSheet destSheet,
+            Transform coordTransform,
+            Dictionary<ElementId, ElementId> viewMap,
+            TransferResult result,
+            MigrationSettings settings)
+        {
+            var existingViewIds = new HashSet<ElementId>(
+                destSheet.GetAllViewports()
+                    .Select(vpId => target.GetElement(vpId))
+                    .OfType<Viewport>()
+                    .Select(vp => vp.ViewId));
+
+            foreach (var srcVportId in srcSheet.GetAllViewports())
+            {
+                Viewport srcVport = source.GetElement(srcVportId)
+                    as Viewport;
+                if (srcVport == null) continue;
+
+                View srcView = source.GetElement(srcVport.ViewId) as View;
+                if (srcView == null) continue;
+
+                // ── Copy or update the referenced view ────────
+                ElementId destViewId;
+                if (viewMap.ContainsKey(srcVport.ViewId))
+                {
+                    destViewId = viewMap[srcVport.ViewId];
+                }
+                else
+                {
+                    destViewId = CopyOrUpdateSingleView(
+                        source, target, srcView,
+                        coordTransform, result, settings);
+
+                    if (destViewId != ElementId.InvalidElementId)
+                        viewMap[srcVport.ViewId] = destViewId;
+                }
+
+                if (destViewId == ElementId.InvalidElementId)
+                {
+                    result.Warnings.Add(
+                        $"Could not copy view '{srcView.Name}' "
+                        + "for viewport placement.");
+                    continue;
+                }
+
+                // Check if view is already on another sheet
+                View destView = target.GetElement(destViewId) as View;
+                if (destView == null) continue;
+
+                // Check existing placement
+                if (existingViewIds.Contains(destViewId))
+                {
+                    result.Warnings.Add(
+                        $"View '{srcView.Name}' already on sheet "
+                        + $"'{destSheet.SheetNumber}'.");
+                    continue;
+                }
+
+                // Check if placed on a different sheet
+                string placedSheet = GetViewSheetNumber(target, destView);
+                if (placedSheet != null
+                    && placedSheet != destSheet.SheetNumber)
+                {
+                    result.Warnings.Add(
+                        $"View '{srcView.Name}' already placed on "
+                        + $"sheet '{placedSheet}', skipping.");
+                    continue;
+                }
+
+                // ── Capture source viewport data ──────────────
+                var srcData = CaptureViewportData(
+                    source, srcVport, srcSheet);
+
+                // ── Place viewport on destination sheet ───────
+                Viewport newVport = null;
+                using (var t = new Transaction(target,
+                    "HMV – Place Viewport"))
+                {
+                    t.Start();
+                    try
+                    {
+                        newVport = Viewport.Create(
+                            target,
+                            destSheet.Id,
+                            destViewId,
+                            srcData.BoxCenter);
+
+                        // Preserve detail number
+                        if (settings.SheetOptions.PreserveDetailNumbers)
+                        {
+                            ApplyDetailNumber(
+                                srcVport, newVport, result);
+                        }
+
+                        t.Commit();
+                        result.ViewportsCopied++;
+                    }
+                    catch (Exception ex)
+                    {
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Could not place viewport for "
+                            + $"'{srcView.Name}': {ex.Message}");
+                        continue;
+                    }
+                }
+
+                if (newVport == null) continue;
+
+                // ── Match viewport type ───────────────────────
+                ApplyViewportType(
+                    source, srcVportId, target, newVport.Id, result);
+
+                // ── Label offset and line length (2022+) ──────
+                ApplyLabelProperties(
+                    target, newVport.Id, srcData, result);
+
+                // ── BBox position correction ──────────────────
+                CorrectViewportByBBox(
+                    target, newVport.Id, srcData, destSheet, result);
+            }
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7b. SINGLE VIEW COPY/UPDATE FOR VIEWPORT REFS
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Copies or updates a single view referenced by a viewport.
+        /// Uses the same create/update logic but tailored for the
+        /// sheet-viewport workflow. Handles DrawingSheet, DraftingView,
+        /// Legend, and spatial views.
+        /// </summary>
+        private static ElementId CopyOrUpdateSingleView(
+            Document source, Document target,
+            View srcView,
+            Transform coordTransform,
+            TransferResult result,
+            MigrationSettings settings)
+        {
+            ViewTransferMode mode = settings.TransferMode;
+            var opts = settings.SheetOptions;
+
+            // Check for existing match
+            View existing = FindMatchingView(target, srcView);
+
+            if (existing != null && mode == ViewTransferMode.Update)
+            {
+                // Update existing view contents
+                using (var t = new Transaction(target,
+                    "HMV – Update View Contents"))
+                {
+                    t.Start();
+                    ClearViewContents(target, existing, opts);
+                    CopyViewContentsViewToView(
+                        source, srcView, target, existing, opts);
+                    CopyViewProperties(srcView, existing);
+                    t.Commit();
+                }
+                result.ViewsUpdated++;
+                return existing.Id;
+            }
+            else if (existing != null && mode == ViewTransferMode.Create)
+            {
+                // View exists but user wants Create mode
+                // For views that can't be on multiple sheets, just
+                // reuse the existing one
+                result.Warnings.Add(
+                    $"View '{srcView.Name}' exists in target, reusing.");
+                return existing.Id;
+            }
+
+            // ── Create new view ───────────────────────────────
+            ElementId newViewId = ElementId.InvalidElementId;
+
+            using (var t = new Transaction(target,
+                "HMV – Create View for Sheet"))
+            {
+                t.Start();
+
+                switch (srcView.ViewType)
+                {
+                    case ViewType.DraftingView:
+                        newViewId = CreateDraftingView(
+                            source, target, srcView, result);
+                        break;
+
+                    case ViewType.Legend:
+                        newViewId = CreateLegendView(
+                            source, target, srcView, result);
+                        break;
+
+                    case ViewType.FloorPlan:
+                    case ViewType.CeilingPlan:
+                        newViewId = ForceCreatePlan(
+                            source, target,
+                            srcView as ViewPlan, result);
+                        break;
+
+                    case ViewType.Section:
+                    case ViewType.Detail:
+                    case ViewType.Elevation:
+                        newViewId = ForceCreateSection(
+                            source, target,
+                            srcView as ViewSection, result);
+                        break;
+
+                    default:
+                        result.Warnings.Add(
+                            $"Unsupported view type "
+                            + $"'{srcView.ViewType}' for "
+                            + $"'{srcView.Name}'.");
+                        t.RollBack();
+                        return ElementId.InvalidElementId;
+                }
+
+                if (newViewId != ElementId.InvalidElementId)
+                {
+                    t.Commit();
+                    result.ViewsCreated++;
+                }
+                else
+                {
+                    t.RollBack();
+                    return ElementId.InvalidElementId;
+                }
+            }
+
+            // Copy contents into the new view
+            View newView = target.GetElement(newViewId) as View;
+            if (newView != null)
+            {
+                using (var t = new Transaction(target,
+                    "HMV – Copy View Contents"))
+                {
+                    t.Start();
+                    CopyViewContentsViewToView(
+                        source, srcView, target, newView, opts);
+                    t.Commit();
+                }
+            }
+
+            return newViewId;
+        }
+
+        /// <summary>
+        /// Creates a DraftingView in the target document.
+        /// Mirrors pyRevit's drafting view creation.
+        /// </summary>
+        private static ElementId CreateDraftingView(
+            Document source, Document target,
+            View srcView, TransferResult result)
+        {
+            ElementId typeId = target.GetDefaultElementTypeId(
+                ElementTypeGroup.ViewTypeDrafting);
+
+            if (typeId == null || typeId == ElementId.InvalidElementId)
+            {
+                result.Warnings.Add(
+                    "No default drafting view type in target.");
+                return ElementId.InvalidElementId;
+            }
+
+            ViewDrafting newView = ViewDrafting.Create(target, typeId);
+            if (newView == null) return ElementId.InvalidElementId;
+
+            newView.Name = GetUniqueViewName(target, srcView.Name);
+            CopyViewProperties(srcView, newView);
+
+            return newView.Id;
+        }
+
+        /// <summary>
+        /// Creates a Legend view in the target by duplicating the
+        /// first existing legend. Mirrors pyRevit's legend creation.
+        /// </summary>
+        private static ElementId CreateLegendView(
+            Document source, Document target,
+            View srcView, TransferResult result)
+        {
+            // Find first legend in target to duplicate
+            View firstLegend = new FilteredElementCollector(target)
+                .OfClass(typeof(View))
+                .Cast<View>()
+                .FirstOrDefault(v => v.ViewType == ViewType.Legend
+                    && !v.IsTemplate);
+
+            if (firstLegend == null)
+            {
+                result.Warnings.Add(
+                    "Target document has no Legend view to "
+                    + "duplicate. Skipping legend.");
+                return ElementId.InvalidElementId;
+            }
+
+            ElementId newId = firstLegend.Duplicate(
+                ViewDuplicateOption.Duplicate);
+
+            View newView = target.GetElement(newId) as View;
+            if (newView == null) return ElementId.InvalidElementId;
+
+            newView.Name = GetUniqueViewName(target, srcView.Name);
+            CopyViewProperties(srcView, newView);
+
+            return newView.Id;
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7c. VIEWPORT TYPE MATCHING
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Copies the viewport type from source to target if needed,
+        /// then applies it to the new viewport.
+        /// Mirrors pyRevit apply_viewport_type + copy_viewport_types.
+        /// </summary>
+        private static void ApplyViewportType(
+            Document source, ElementId srcVportId,
+            Document target, ElementId destVportId,
+            TransferResult result)
+        {
+            using (var t = new Transaction(target,
+                "HMV – Apply Viewport Type"))
+            {
+                t.Start();
+                try
+                {
+                    Viewport srcVport = source.GetElement(srcVportId)
+                        as Viewport;
+                    Element srcType = source.GetElement(
+                        srcVport.GetTypeId());
+                    string srcTypeName = srcType.Name;
+
+                    Viewport destVport = target.GetElement(destVportId)
+                        as Viewport;
+
+                    // Check if type name exists in target
+                    var destTypeNames = new HashSet<string>(
+                        destVport.GetValidTypes()
+                            .Select(id => target.GetElement(id).Name));
+
+                    if (!destTypeNames.Contains(srcTypeName))
+                    {
+                        // Copy the viewport type to target
+                        var cpOpts = new CopyPasteOptions();
+                        cpOpts.SetDuplicateTypeNamesHandler(
+                            new UseDestinationTypesHandler());
+
+                        ElementTransformUtils.CopyElements(
+                            source,
+                            new List<ElementId> { srcType.Id },
+                            target,
+                            null,
+                            cpOpts);
+                    }
+
+                    // Find and apply matching type
+                    foreach (var vtId in destVport.GetValidTypes())
+                    {
+                        Element vt = target.GetElement(vtId);
+                        if (vt.Name == srcTypeName)
+                        {
+                            destVport.ChangeTypeId(vtId);
+                            break;
+                        }
+                    }
+
+                    t.Commit();
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Could not apply viewport type: "
+                        + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Applies detail number from source to destination viewport.
+        /// Mirrors pyRevit apply_detail_number.
+        /// </summary>
+        private static void ApplyDetailNumber(
+            Viewport srcVport, Viewport destVport,
+            TransferResult result)
+        {
+            try
+            {
+                var srcParam = srcVport.get_Parameter(
+                    BuiltInParameter.VIEWPORT_DETAIL_NUMBER);
+                if (srcParam == null) return;
+
+                string detailNum = srcParam.AsString();
+                if (string.IsNullOrEmpty(detailNum)) return;
+
+                var destParam = destVport.get_Parameter(
+                    BuiltInParameter.VIEWPORT_DETAIL_NUMBER);
+                if (destParam != null && !destParam.IsReadOnly)
+                {
+                    destParam.Set(detailNum);
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"Could not preserve detail number: "
+                    + ex.Message);
+            }
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7d. VIEWPORT POSITIONING (Label, BBox correction)
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Captures source viewport placement data: center, label
+        /// offset, label line length, and bounding box on the sheet.
+        /// Mirrors pyRevit get_source_vport_data.
+        /// </summary>
+        public static ViewportData CaptureViewportData(
+            Document doc, Viewport vport, ViewSheet sheet)
+        {
+            var data = new ViewportData
+            {
+                BoxCenter = vport.GetBoxCenter()
+            };
+
+            try { data.LabelOffset = vport.LabelOffset; }
+            catch { /* Revit 2022+ only */ }
+
+            try { data.LabelLineLength = vport.LabelLineLength; }
+            catch { /* Revit 2022+ only */ }
+
+            try
+            {
+                BoundingBoxXYZ bb = vport.get_BoundingBox(sheet);
+                if (bb != null)
+                {
+                    data.BBoxMin = bb.Min;
+                    data.BBoxMax = bb.Max;
+                }
+            }
+            catch { }
+
+            return data;
+        }
+
+        /// <summary>
+        /// Sets label offset and line length on destination viewport.
+        /// Mirrors pyRevit apply_vport_label_props.
+        /// </summary>
+        private static void ApplyLabelProperties(
+            Document destDoc, ElementId destVportId,
+            ViewportData srcData, TransferResult result)
+        {
+            if (srcData.LabelOffset == null
+                && srcData.LabelLineLength == null)
+                return;
+
+            using (var t = new Transaction(destDoc,
+                "HMV – Set View Title Properties"))
+            {
+                t.Start();
+                try
+                {
+                    Viewport vp = destDoc.GetElement(destVportId)
+                        as Viewport;
+
+                    if (srcData.LabelOffset != null)
+                    {
+                        try { vp.LabelOffset = srcData.LabelOffset; }
+                        catch { /* 2022+ */ }
+                    }
+                    if (srcData.LabelLineLength != null)
+                    {
+                        try
+                        {
+                            vp.LabelLineLength =
+                                srcData.LabelLineLength.Value;
+                        }
+                        catch { /* 2022+ */ }
+                    }
+
+                    t.Commit();
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Label property set failed: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Verifies viewport position using BoundingBox(sheet) and
+        /// corrects any residual drift with MoveElement.
+        /// Mirrors pyRevit correct_vport_by_bbox.
+        /// </summary>
+        private static void CorrectViewportByBBox(
+            Document destDoc, ElementId destVportId,
+            ViewportData srcData, ViewSheet destSheet,
+            TransferResult result)
+        {
+            if (srcData.BBoxMin == null) return;
+
+            try
+            {
+                Viewport vp = destDoc.GetElement(destVportId)
+                    as Viewport;
+                BoundingBoxXYZ dstBb = vp.get_BoundingBox(destSheet);
+                if (dstBb == null) return;
+
+                double dx = srcData.BBoxMin.X - dstBb.Min.X;
+                double dy = srcData.BBoxMin.Y - dstBb.Min.Y;
+
+                if (Math.Abs(dx) <= 1e-9 && Math.Abs(dy) <= 1e-9)
+                    return;
+
+                using (var t = new Transaction(destDoc,
+                    "HMV – Align Viewport Position"))
+                {
+                    t.Start();
+                    ElementTransformUtils.MoveElement(
+                        destDoc,
+                        destVportId,
+                        new XYZ(dx, dy, 0));
+                    t.Commit();
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"BBox position correction failed: "
+                    + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Gets the sheet number where a view is currently placed,
+        /// or null if not placed.
+        /// </summary>
+        private static string GetViewSheetNumber(
+            Document doc, View view)
+        {
+            try
+            {
+                var param = view.get_Parameter(
+                    BuiltInParameter.VIEW_SHEET_VIEWPORT_INFO);
+                if (param != null)
+                {
+                    string val = param.AsString();
+                    if (!string.IsNullOrEmpty(val)
+                        && val != "---")
+                        return val;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7e. SHEET GUIDE GRIDS
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Copies and assigns guide grids from source sheet to
+        /// destination sheet. Mirrors pyRevit copy_sheet_guides.
+        /// </summary>
+        private static void CopySheetGuides(
+            Document source, ViewSheet srcSheet,
+            Document target, ViewSheet destSheet,
+            TransferResult result)
+        {
+            try
+            {
+                var guideParam = srcSheet.get_Parameter(
+                    BuiltInParameter.SHEET_GUIDE_GRID);
+                if (guideParam == null) return;
+
+                Element srcGuide = source.GetElement(
+                    guideParam.AsElementId());
+                if (srcGuide == null) return;
+
+                // Find or copy guide in target
+                Element destGuide = FindGuideByName(
+                    target, srcGuide.Name);
+
+                if (destGuide == null)
+                {
+                    // Copy guide to target
+                    var cpOpts = new CopyPasteOptions();
+                    cpOpts.SetDuplicateTypeNamesHandler(
+                        new UseDestinationTypesHandler());
+
+                    using (var t = new Transaction(target,
+                        "HMV – Copy Guide Grid"))
+                    {
+                        t.Start();
+                        ElementTransformUtils.CopyElements(
+                            source,
+                            new List<ElementId> { srcGuide.Id },
+                            target,
+                            null,
+                            cpOpts);
+                        t.Commit();
+                    }
+
+                    destGuide = FindGuideByName(target, srcGuide.Name);
+                }
+
+                if (destGuide != null)
+                {
+                    using (var t = new Transaction(target,
+                        "HMV – Set Sheet Guide Grid"))
+                    {
+                        t.Start();
+                        var destParam = destSheet.get_Parameter(
+                            BuiltInParameter.SHEET_GUIDE_GRID);
+                        if (destParam != null)
+                            destParam.Set(destGuide.Id);
+                        t.Commit();
+                    }
+                }
+                else
+                {
+                    result.Warnings.Add(
+                        $"Could not copy guide grid for sheet "
+                        + $"'{srcSheet.SheetNumber}'.");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"Guide grid copy failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Finds a guide grid element by name in a document.
+        /// Mirrors pyRevit find_guide.
+        /// </summary>
+        private static Element FindGuideByName(
+            Document doc, string guideName)
+        {
+            return new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_GuideGrid)
+                .WhereElementIsNotElementType()
+                .ToElements()
+                .FirstOrDefault(e => string.Equals(
+                    e.Name, guideName,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  7f. SHEET REVISIONS
+        // ═══════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Copies revisions from source sheet to destination sheet.
+        /// Creates missing revisions in target if needed.
+        /// Mirrors pyRevit copy_sheet_revisions.
+        /// </summary>
+        private static void CopySheetRevisions(
+            Document source, ViewSheet srcSheet,
+            Document target, ViewSheet destSheet,
+            TransferResult result)
+        {
+            try
+            {
+                var srcRevIds = srcSheet.GetAdditionalRevisionIds();
+                if (srcRevIds == null || srcRevIds.Count == 0) return;
+
+                var allDestRevs = new FilteredElementCollector(target)
+                    .OfCategory(BuiltInCategory.OST_Revisions)
+                    .WhereElementIsNotElementType()
+                    .Cast<Revision>()
+                    .ToList();
+
+                var revisionsToSet = new List<ElementId>();
+
+                using (var t = new Transaction(target,
+                    "HMV – Copy Sheet Revisions"))
+                {
+                    t.Start();
+
+                    foreach (var srcRevId in srcRevIds)
+                    {
+                        Revision srcRev = source.GetElement(srcRevId)
+                            as Revision;
+                        if (srcRev == null) continue;
+
+                        ElementId destRevId = FindOrCreateRevision(
+                            srcRev, allDestRevs, target, result);
+
+                        if (destRevId != ElementId.InvalidElementId)
+                            revisionsToSet.Add(destRevId);
+                    }
+
+                    if (revisionsToSet.Count > 0)
+                    {
+                        // Merge with existing additional revisions
+                        var existing = destSheet
+                            .GetAdditionalRevisionIds()
+                            .ToList();
+                        foreach (var id in revisionsToSet)
+                        {
+                            if (!existing.Contains(id))
+                                existing.Add(id);
+                        }
+                        destSheet.SetAdditionalRevisionIds(existing);
+                    }
+
+                    t.Commit();
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"Revision copy failed for sheet "
+                    + $"'{srcSheet.SheetNumber}': {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Finds a matching revision in target or creates a new one.
+        /// Mirrors pyRevit ensure_dest_revision.
+        /// </summary>
+        private static ElementId FindOrCreateRevision(
+            Revision srcRev,
+            List<Revision> allDestRevs,
+            Document target,
+            TransferResult result)
+        {
+            // Try to match by date + description
+            foreach (var destRev in allDestRevs)
+            {
+                if (destRev.RevisionDate == srcRev.RevisionDate
+                    && destRev.Description == srcRev.Description)
+                    return destRev.Id;
+            }
+
+            // Create new revision
+            try
+            {
+                Revision newRev = Revision.Create(target);
+                newRev.Description = srcRev.Description;
+                newRev.IssuedBy = srcRev.IssuedBy;
+                newRev.IssuedTo = srcRev.IssuedTo;
+                newRev.RevisionDate = srcRev.RevisionDate;
+
+                result.Warnings.Add(
+                    $"Created revision: '{srcRev.Description}' "
+                    + $"({srcRev.RevisionDate})");
+
+                // Add to cache so we don't create it again
+                allDestRevs.Add(newRev);
+
+                return newRev.Id;
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"Could not create revision "
+                    + $"'{srcRev.Description}': {ex.Message}");
+                return ElementId.InvalidElementId;
+            }
+        }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  4. COPY & ASSIGN VIEW TEMPLATES
+        // ═══════════════════════════════════════════════════════
+
         public static void CopyAndAssignViewTemplates(
             Document source,
             Document target,
@@ -422,7 +1588,6 @@ namespace HMVTools
             opts.SetDuplicateTypeNamesHandler(
                 new UseDestinationTypesHandler());
 
-            // Cache: source template Id → already-copied target template Id
             var copiedTemplates = new Dictionary<ElementId, ElementId>();
 
             using (var t = new Transaction(target,
@@ -439,7 +1604,6 @@ namespace HMVTools
 
                     ElementId srcTemplateId = srcView.ViewTemplateId;
 
-                    // Copy template only once per unique source template
                     if (!copiedTemplates.ContainsKey(srcTemplateId))
                     {
                         try
@@ -467,7 +1631,6 @@ namespace HMVTools
                         }
                     }
 
-                    // Assign to migrated view
                     if (copiedTemplates.TryGetValue(srcTemplateId,
                             out ElementId tgtTemplateId))
                     {
@@ -508,10 +1671,9 @@ namespace HMVTools
             opts.SetDuplicateTypeNamesHandler(
                 new UseDestinationTypesHandler());
 
-            // Categories to copy, in order of likelihood to succeed
             var categories = new[]
             {
-                BuiltInCategory.OST_Lines,          // detail lines
+                BuiltInCategory.OST_Lines,
                 BuiltInCategory.OST_TextNotes,
                 BuiltInCategory.OST_GenericAnnotation,
                 BuiltInCategory.OST_DetailComponents,
@@ -541,13 +1703,9 @@ namespace HMVTools
 
                     if (ids.Count == 0) continue;
 
-                    // Try view-to-view first
-                    bool copied = TryCopyAnnotations(
+                    TryCopyAnnotations(
                         srcView, tgtView, ids, opts, result,
                         $"{bic} in '{srcView.Name}'");
-
-                    // No fallback — doc-to-doc copies cause
-                    // link name conflicts and orphaned elements
                 }
             }
         }
@@ -578,8 +1736,7 @@ namespace HMVTools
                 {
                     t.RollBack();
                     result.Warnings.Add(
-                        $"{label}: view-to-view blocked, "
-                        + "tried doc-to-doc fallback.");
+                        $"{label}: view-to-view copy failed.");
                     return false;
                 }
             }
@@ -590,11 +1747,6 @@ namespace HMVTools
         //  6. COPY CATEGORY GRAPHIC OVERRIDES
         // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        /// Copies per-category graphic overrides from source views
-        /// to target views. Remaps FillPattern and LinePattern IDs
-        /// by name lookup, copying missing patterns to target.
-        /// </summary>
         public static void CopyCategoryOverrides(
             Document source,
             Document target,
@@ -603,7 +1755,6 @@ namespace HMVTools
         {
             if (viewMap.Count == 0) return;
 
-            // Cache pattern remapping: source PatternId → target PatternId
             var fillPatternMap = new Dictionary<ElementId, ElementId>();
             var linePatternMap = new Dictionary<ElementId, ElementId>();
 
@@ -624,12 +1775,10 @@ namespace HMVTools
                     View tgtView = target.GetElement(kvp.Value) as View;
                     if (srcView == null || tgtView == null) continue;
 
-                    // Skip drafting/legend — no model categories
                     if (srcView.ViewType == ViewType.DraftingView
                         || srcView.ViewType == ViewType.Legend)
                         continue;
 
-                    // Iterate all categories in the document
                     foreach (Category cat in source.Settings.Categories)
                     {
                         if (cat == null) continue;
@@ -642,7 +1791,6 @@ namespace HMVTools
 
                             if (IsOverrideEmpty(srcOgs)) continue;
 
-                            // Remap pattern IDs
                             OverrideGraphicSettings tgtOgs =
                                 RemapOverride(source, target,
                                     srcOgs, fillPatternMap,
@@ -651,7 +1799,7 @@ namespace HMVTools
                             tgtView.SetCategoryOverrides(catId, tgtOgs);
                             overrideCount++;
                         }
-                        catch { /* category may not be overridable */ }
+                        catch { }
                     }
                 }
 
@@ -663,10 +1811,6 @@ namespace HMVTools
                     $"{overrideCount} category graphic overrides applied.");
         }
 
-        /// <summary>
-        /// Creates a new OverrideGraphicSettings with all pattern
-        /// and line IDs remapped from source to target document.
-        /// </summary>
         private static OverrideGraphicSettings RemapOverride(
             Document source, Document target,
             OverrideGraphicSettings src,
@@ -676,7 +1820,6 @@ namespace HMVTools
         {
             var tgt = new OverrideGraphicSettings();
 
-            // ── Colors (direct copy, no remapping) ─────────
             tgt.SetProjectionLineColor(src.ProjectionLineColor);
             tgt.SetCutLineColor(src.CutLineColor);
             tgt.SetSurfaceForegroundPatternColor(src.SurfaceForegroundPatternColor);
@@ -684,15 +1827,12 @@ namespace HMVTools
             tgt.SetCutForegroundPatternColor(src.CutForegroundPatternColor);
             tgt.SetCutBackgroundPatternColor(src.CutBackgroundPatternColor);
 
-            // ── Line weights (direct copy) ─────────────────
             tgt.SetProjectionLineWeight(src.ProjectionLineWeight);
             tgt.SetCutLineWeight(src.CutLineWeight);
 
-            // ── Simple values (direct copy) ────────────────
             tgt.SetHalftone(src.Halftone);
             tgt.SetSurfaceTransparency(src.Transparency);
 
-            // ── Line patterns (remap by name) ──────────────
             tgt.SetProjectionLinePatternId(
                 RemapLinePattern(source, target,
                     src.ProjectionLinePatternId,
@@ -703,7 +1843,6 @@ namespace HMVTools
                     src.CutLinePatternId,
                     lineMap, copyOpts));
 
-            // ── Fill patterns (remap by name) ──────────────
             tgt.SetSurfaceForegroundPatternId(
                 RemapFillPattern(source, target,
                     src.SurfaceForegroundPatternId,
@@ -740,7 +1879,6 @@ namespace HMVTools
             if (cache.TryGetValue(srcPatternId, out ElementId cached))
                 return cached;
 
-            // Get source pattern name
             FillPatternElement srcElem =
                 source.GetElement(srcPatternId) as FillPatternElement;
             if (srcElem == null)
@@ -749,7 +1887,6 @@ namespace HMVTools
                 return ElementId.InvalidElementId;
             }
 
-            // Try to find by name in target
             FillPatternElement tgtElem =
                 FillPatternElement.GetFillPatternElementByName(
                     target, srcElem.GetFillPattern().Target,
@@ -761,7 +1898,6 @@ namespace HMVTools
                 return tgtElem.Id;
             }
 
-            // Not found — copy it from source
             try
             {
                 var copied = ElementTransformUtils.CopyElements(
@@ -791,7 +1927,6 @@ namespace HMVTools
                 || srcPatternId == ElementId.InvalidElementId)
                 return ElementId.InvalidElementId;
 
-            // Solid line is a built-in — no remapping needed
             if (srcPatternId.IntegerValue < 0)
                 return srcPatternId;
 
@@ -806,7 +1941,6 @@ namespace HMVTools
                 return ElementId.InvalidElementId;
             }
 
-            // Try name match in target
             LinePatternElement tgtElem =
                 LinePatternElement.GetLinePatternElementByName(
                     target, srcElem.Name);
@@ -817,7 +1951,6 @@ namespace HMVTools
                 return tgtElem.Id;
             }
 
-            // Copy from source
             try
             {
                 var copied = ElementTransformUtils.CopyElements(
@@ -881,11 +2014,6 @@ namespace HMVTools
             return markers;
         }
 
-        /// <summary>
-        /// Safely collects reference marker ids from a view.
-        /// The getter returns List&lt;ElementId&gt; to avoid
-        /// ICollection/IList conversion issues.
-        /// </summary>
         private static void CollectRefs(
             Document doc,
             View view,
@@ -907,6 +2035,12 @@ namespace HMVTools
             }
             catch { /* not available on all view types */ }
         }
+
+
+        // ═══════════════════════════════════════════════════════
+        //  HELPERS: ForceCreate, Level matching, Unique names
+        // ═══════════════════════════════════════════════════════
+
         private static ElementId ForceCreateView(
             Document source, Document target,
             ElementId srcViewId, TransferResult result)
@@ -936,14 +2070,12 @@ namespace HMVTools
             Document source, Document target,
             ViewPlan srcPlan, TransferResult result)
         {
-            // Find the existing view on the matching level
             Level srcLevel = source.GetElement(srcPlan.GenLevel.Id) as Level;
             if (srcLevel == null) return ElementId.InvalidElementId;
 
             Level tgtLevel = FindClosestLevel(target, srcLevel.Elevation);
             if (tgtLevel == null) return ElementId.InvalidElementId;
 
-            // Find existing ViewPlan on that level
             ViewPlan existingView = new FilteredElementCollector(target)
                 .OfClass(typeof(ViewPlan))
                 .Cast<ViewPlan>()
@@ -960,7 +2092,6 @@ namespace HMVTools
                 return ElementId.InvalidElementId;
             }
 
-            // Duplicate it (WithDetailing keeps annotations if any)
             ElementId newId = existingView.Duplicate(
                 ViewDuplicateOption.WithDetailing);
 
@@ -969,7 +2100,6 @@ namespace HMVTools
 
             newView.Name = GetUniqueViewName(target, srcPlan.Name);
 
-            // Match crop box from source
             if (srcPlan.CropBoxActive)
             {
                 try
@@ -981,7 +2111,6 @@ namespace HMVTools
                 catch { }
             }
 
-            // Match view range from source
             try
             {
                 PlanViewRange srcRange = srcPlan.GetViewRange();
@@ -998,7 +2127,6 @@ namespace HMVTools
             }
             catch { }
 
-            // Match scale
             try { newView.Scale = srcPlan.Scale; } catch { }
 
             return newView.Id;
@@ -1021,14 +2149,12 @@ namespace HMVTools
             if (vftId == null || vftId == ElementId.InvalidElementId)
                 return ElementId.InvalidElementId;
 
-            // Transform the section box to target coordinates
             Transform coordTransform =
                 ComputeSharedCoordinateTransform(source, target);
 
             BoundingBoxXYZ srcBox = srcSection.CropBox;
             Transform srcT = srcBox.Transform;
 
-            // Remap origin and basis vectors
             BoundingBoxXYZ tgtBox = new BoundingBoxXYZ();
 
             Transform newT = Transform.Identity;
@@ -1038,7 +2164,7 @@ namespace HMVTools
             newT.BasisZ = coordTransform.OfVector(srcT.BasisZ).Normalize();
 
             tgtBox.Transform = newT;
-            tgtBox.Min = srcBox.Min;  // local extents stay the same
+            tgtBox.Min = srcBox.Min;
             tgtBox.Max = srcBox.Max;
             tgtBox.Enabled = true;
 
@@ -1077,5 +2203,23 @@ namespace HMVTools
             while (existing.Contains($"{desired} ({n})")) n++;
             return $"{desired} ({n})";
         }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════
+    //  ViewportData — captures source viewport placement info
+    // ═══════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Holds source viewport positioning data for accurate
+    /// placement in the destination sheet.
+    /// </summary>
+    public class ViewportData
+    {
+        public XYZ BoxCenter { get; set; }
+        public XYZ LabelOffset { get; set; }
+        public double? LabelLineLength { get; set; }
+        public XYZ BBoxMin { get; set; }
+        public XYZ BBoxMax { get; set; }
     }
 }
