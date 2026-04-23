@@ -3,8 +3,11 @@ using Autodesk.Revit.DB.Electrical;
 using Autodesk.Revit.DB.Plumbing;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
+using IxMilia.Dxf;
+using IxMilia.Dxf.Entities;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Input;
@@ -151,6 +154,118 @@ namespace HMVTools
         }
     }
 
+    /// <summary>
+    /// Restricts selection to FlexPipe MEP curves only.
+    /// </summary>
+    public class FlexPipeSelectionFilter : ISelectionFilter
+    {
+        public bool AllowElement(Element elem) => elem is FlexPipe;
+        public bool AllowReference(Reference reference, XYZ position) => false;
+    }
+
+    /// <summary>
+    /// Picks a FlexPipe and mirrors it about its own A→B axis,
+    /// flipping the bulge to the opposite side. Deletes the original.
+    /// </summary>
+    public class MirrorFlexPipeHandler : IExternalEventHandler
+    {
+        public ConexionFlexPipeWindow UI { get; set; }
+
+        public string GetName() => "MirrorFlexPipeHandler";
+
+        public void Execute(UIApplication app)
+        {
+            UIDocument uidoc = app.ActiveUIDocument;
+            Document   doc   = uidoc.Document;
+
+            try
+            {
+                // ── 1. Pick the FlexPipe ──────────────────────────────────────
+                Reference elemRef = uidoc.Selection.PickObject(
+                    ObjectType.Element,
+                    new FlexPipeSelectionFilter(),
+                    "Select the FlexPipe to mirror — ESC to cancel");
+
+                FlexPipe flexPipe = doc.GetElement(elemRef) as FlexPipe;
+                if (flexPipe == null)
+                    throw new InvalidOperationException("Selected element is not a FlexPipe.");
+
+                // ── 2. Get trajectory points ──────────────────────────────────
+                IList<XYZ> pts = flexPipe.Points;
+                if (pts == null || pts.Count < 3)
+                    throw new InvalidOperationException(
+                        "FlexPipe has too few points to determine a mirror plane.");
+
+                XYZ ptA = pts[0];
+                XYZ ptB = pts[pts.Count - 1];
+                XYZ uAB = (ptB - ptA).Normalize();
+
+                // ── 3. Find the maximum-deviation (bulge) point ───────────────
+                // Project each intermediate point onto the A-B line and measure
+                // the perpendicular distance; take the largest one.
+                XYZ bulgePt  = null;
+                double maxDev = 0.0;
+
+                for (int i = 1; i < pts.Count - 1; i++)
+                {
+                    XYZ local     = pts[i] - ptA;
+                    double along  = local.DotProduct(uAB);
+                    XYZ projected = ptA + uAB * along;
+                    double dev    = pts[i].DistanceTo(projected);
+                    if (dev > maxDev)
+                    {
+                        maxDev  = dev;
+                        bulgePt = pts[i];
+                    }
+                }
+
+                if (bulgePt == null || maxDev < 1e-6)
+                    throw new InvalidOperationException(
+                        "FlexPipe appears to be straight — nothing to mirror.");
+
+                // ── 4. Build mirror plane ─────────────────────────────────────
+                // bulgeDir = perpendicular-to-AB direction where the curve deviates
+                XYZ local2     = bulgePt - ptA;
+                double along2  = local2.DotProduct(uAB);
+                XYZ projected2 = ptA + uAB * along2;
+                XYZ bulgeDir   = (bulgePt - projected2).Normalize();
+
+                // Mirror plane: contains the A-B line, normal = bulgeDir
+                // → reflects the bulge to the opposite side of A-B
+                Plane mirrorPlane = Plane.CreateByNormalAndOrigin(bulgeDir, ptA);
+
+                // ── 5. Mirror + delete original ───────────────────────────────
+                using (Transaction t = new Transaction(doc, "Mirror FlexPipe"))
+                {
+                    t.Start();
+
+                    FailureHandlingOptions fho = t.GetFailureHandlingOptions();
+                    fho.SetFailuresPreprocessor(new WarningSuppressor());
+                    t.SetFailureHandlingOptions(fho);
+
+                    // MirrorElement creates a mirrored copy; delete the original
+                    ElementTransformUtils.MirrorElement(doc, flexPipe.Id, mirrorPlane);
+                    doc.Delete(flexPipe.Id);
+
+                    t.Commit();
+                }
+
+                UI?.SetStatus("✔ FlexPipe mirrored successfully.");
+                UI?.RestoreWindow();
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                UI?.SetStatus("Mirror canceled by user.");
+                UI?.RestoreWindow();
+            }
+            catch (Exception ex)
+            {
+                UI?.SetStatus("Mirror error: " + ex.Message);
+                UI?.RestoreWindow();
+            }
+        }
+    }
+
     public partial class ConexionFlexPipeWindow : Window
     {
         private UIApplication _uiapp;
@@ -164,6 +279,14 @@ namespace HMVTools
         private XYZ _pointA = null;
         private XYZ _pointB = null;
 
+        // ── Mirror infrastructure ──────────────────────────────────────────────
+        private MirrorFlexPipeHandler _mirrorHandler;
+        private ExternalEvent         _mirrorEvent;
+
+        // ── DXF raw deltas (mm) stored on Browse ──────────────────────────────
+        private double _dxfDeltaX = double.NaN;
+        private double _dxfDeltaY = double.NaN;
+
         public ConexionFlexPipeWindow(UIApplication uiapp, ElectricalConnectionHandler handler, ExternalEvent exEvent)
         {
             InitializeComponent();
@@ -174,7 +297,11 @@ namespace HMVTools
 
             // Create dedicated pick handler + event
             _pickHandler = new PickPointHandler { UI = this };
-            _pickEvent = ExternalEvent.Create(_pickHandler);
+            _pickEvent   = ExternalEvent.Create(_pickHandler);
+
+            // Create mirror handler + event
+            _mirrorHandler = new MirrorFlexPipeHandler { UI = this };
+            _mirrorEvent   = ExternalEvent.Create(_mirrorHandler);
 
             this.Closed += (s, e) => { ElectricalConnectionCommand.ClearWindow(); };
 
@@ -191,7 +318,7 @@ namespace HMVTools
                     _pointA = point;
                     lblElementA.Text = $"Point A: X:{point.X:F3}  Y:{point.Y:F3}  Z:{point.Z:F3}";
                     lblElementA.Foreground = new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(0, 130, 60)); // green = confirmed
+                        System.Windows.Media.Color.FromRgb(0, 130, 60));
                     txtStatus.Text = "Point A selected ✔";
                 }
                 else
@@ -199,9 +326,12 @@ namespace HMVTools
                     _pointB = point;
                     lblElementB.Text = $"Point B: X:{point.X:F3}  Y:{point.Y:F3}  Z:{point.Z:F3}";
                     lblElementB.Foreground = new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(0, 130, 60)); // green = confirmed
+                        System.Windows.Media.Color.FromRgb(0, 130, 60));
                     txtStatus.Text = "Point B selected ✔";
                 }
+
+                UpdateDeltaDisplay(); // ← new
+
                 this.Show();
                 this.Activate();
             }));
@@ -280,9 +410,57 @@ namespace HMVTools
                 .Cast<MEPSystemType>()
                 .OrderBy(t => t.Name)
                 .ToList();
-
             cmbSystemType.ItemsSource = sysTypes;
             if (cmbSystemType.Items.Count > 0) cmbSystemType.SelectedIndex = 0;
+
+            // ── Load writable String parameters from any existing FlexPipe ────
+            LoadFlexPipeParameters(doc);
+        }
+
+        private void LoadFlexPipeParameters(Document doc)
+        {
+            var paramNames = new List<string>();
+
+            // Try from an existing FlexPipe instance first
+            FlexPipe sample = new FilteredElementCollector(doc)
+                .OfClass(typeof(FlexPipe))
+                .Cast<FlexPipe>()
+                .FirstOrDefault();
+
+            if (sample != null)
+            {
+                foreach (Parameter p in sample.Parameters)
+                {
+                    if (!p.IsReadOnly && p.StorageType == StorageType.String
+                        && !string.IsNullOrWhiteSpace(p.Definition.Name))
+                        paramNames.Add(p.Definition.Name);
+                }
+            }
+            else
+            {
+                // Fallback: enumerate shared parameters bound to the document
+                BindingMap bm = doc.ParameterBindings;
+                DefinitionBindingMapIterator it = bm.ForwardIterator();
+                it.Reset();
+                while (it.MoveNext())
+                {
+                    Definition def = it.Key;
+                    if (def != null && !string.IsNullOrWhiteSpace(def.Name))
+                        paramNames.Add(def.Name);
+                }
+            }
+
+            paramNames = paramNames.Distinct().OrderBy(n => n).ToList();
+            cmbParamName.ItemsSource = paramNames;
+
+            // Pre-select "DXF_Source" if present, otherwise first item
+            int idx = paramNames.IndexOf("DXF_Source");
+            if (idx >= 0)
+                cmbParamName.SelectedIndex = idx;
+            else if (paramNames.Any())
+                cmbParamName.SelectedIndex = 0;
+            else
+                cmbParamName.Text = "DXF_Source"; // editable fallback
         }
 
         private void TopBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -302,8 +480,13 @@ namespace HMVTools
                 Filter = "DXF Files (*.dxf)|*.dxf",
                 Title = "Seleccionar trayectoria DXF"
             };
-                if (ofd.ShowDialog() == true)
+
+            if (ofd.ShowDialog() == true)
+            {
                 txtDxfPath.Text = ofd.FileName;
+                ParseDxfDeltas(ofd.FileName);
+                UpdateDeltaDisplay();
+            }
         }
 
         private void BtnRun_Click(object sender, RoutedEventArgs e)
@@ -317,18 +500,101 @@ namespace HMVTools
             if (cmbFlexPipeType.SelectedItem == null || cmbSystemType.SelectedItem == null)
             { SetStatus("Error: Seleccione los tipos de FlexPipe y Sistema."); return; }
 
-            if (string.IsNullOrWhiteSpace(txtParamName.Text))
+            string paramName = cmbParamName.SelectedItem as string ?? cmbParamName.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(paramName))
             { SetStatus("Error: Indique el nombre del parámetro compartido."); return; }
 
-            _handler.DxfFilePath = txtDxfPath.Text;
-            _handler.PointA = _pointA;
-            _handler.PointB = _pointB;
-            _handler.SharedParameterName = txtParamName.Text.Trim();
-            _handler.SelectedFlexPipeTypeKey = ((ElementType)cmbFlexPipeType.SelectedItem).Name;
+            _handler.DxfFilePath                    = txtDxfPath.Text;
+            _handler.PointA                         = _pointA;
+            _handler.PointB                         = _pointB;
+            _handler.SharedParameterName            = paramName;
+            _handler.SelectedFlexPipeTypeKey        = ((ElementType)cmbFlexPipeType.SelectedItem).Name;
             _handler.SelectedElectricalSystemTypeKey = ((ElementType)cmbSystemType.SelectedItem).Name;
 
             SetStatus("Procesando geometría DXF y generando FlexPipe...");
             _exEvent.Raise();
+        }
+
+        private void BtnMirrorFlexPipe_Click(object sender, RoutedEventArgs e)
+        {
+            this.Hide();
+            _mirrorEvent.Raise();
+        }
+
+        // ── Parse only first / last raw XY from DXF (mm, no Revit API needed) ─
+        private void ParseDxfDeltas(string filePath)
+        {
+            _dxfDeltaX = double.NaN;
+            _dxfDeltaY = double.NaN;
+
+            try
+            {
+                DxfFile dxf = DxfFile.Load(filePath);
+                double? x0 = null, y0 = null, xN = null, yN = null;
+
+                foreach (DxfEntity entity in dxf.Entities)
+                {
+                    if (entity is DxfLwPolyline lw && lw.Vertices.Any())
+                    {
+                        x0 = lw.Vertices.First().X;  y0 = lw.Vertices.First().Y;
+                        xN = lw.Vertices.Last().X;   yN = lw.Vertices.Last().Y;
+                        break;
+                    }
+                    if (entity is DxfPolyline poly && poly.Vertices.Any())
+                    {
+                        x0 = poly.Vertices.First().Location.X;  y0 = poly.Vertices.First().Location.Y;
+                        xN = poly.Vertices.Last().Location.X;   yN = poly.Vertices.Last().Location.Y;
+                        break;
+                    }
+                    if (entity is DxfLine line)
+                    {
+                        if (x0 == null) { x0 = line.P1.X; y0 = line.P1.Y; }
+                        xN = line.P2.X; yN = line.P2.Y;
+                    }
+                    if (entity is DxfSpline spline && spline.ControlPoints.Any())
+                    {
+                        x0 = spline.ControlPoints.First().Point.X;  y0 = spline.ControlPoints.First().Point.Y;
+                        xN = spline.ControlPoints.Last().Point.X;   yN = spline.ControlPoints.Last().Point.Y;
+                        break;
+                    }
+                }
+
+                if (x0 != null && xN != null)
+                {
+                    _dxfDeltaX = Math.Abs(xN.Value - x0.Value);
+                    _dxfDeltaY = Math.Abs(yN.Value - y0.Value);
+                }
+            }
+            catch { /* silent — display will show N/A */ }
+        }
+
+        // ── Compute and display both delta rows ───────────────────────────────
+        private void UpdateDeltaDisplay()
+        {
+            // DXF row
+            string dxfRow = double.IsNaN(_dxfDeltaX)
+                ? "DXF:  —"
+                : $"DXF:  ΔX = {_dxfDeltaX:F1} mm   ΔY = {_dxfDeltaY:F1} mm";
+
+            // Model row — project B-A into horizontal / vertical components
+            string modelRow;
+            if (_pointA != null && _pointB != null)
+            {
+                double ftToMm = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
+
+                double horizontalMm = Math.Sqrt(
+                    Math.Pow((_pointB.X - _pointA.X) * ftToMm, 2) +
+                    Math.Pow((_pointB.Y - _pointA.Y) * ftToMm, 2));
+                double verticalMm = Math.Abs(_pointB.Z - _pointA.Z) * ftToMm;
+
+                modelRow = $"MODEL: ΔX' = {horizontalMm:F1} mm   ΔY' = {verticalMm:F1} mm";
+            }
+            else
+            {
+                modelRow = "MODEL: —";
+            }
+
+            lblDeltaInfo.Text = dxfRow + "\n" + modelRow;
         }
     }
 }

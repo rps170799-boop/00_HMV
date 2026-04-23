@@ -138,17 +138,21 @@ namespace HMVTools
                 };
 
                 // ═══════════════════════════════════════════════════════
-                // 4. WINDOW 3 — Select section views
+                // 4. WINDOW 3 — Select section / elevation / detail views
                 // ═══════════════════════════════════════════════════════
                 var sectionViews = new List<View>();
                 var sectionItems = new List<SectionViewItem>();
                 ElementId activeId = doc.ActiveView.Id;
 
                 var viewCollector = new FilteredElementCollector(doc)
-                    .OfClass(typeof(ViewSection))
-                    .Cast<ViewSection>()
-                    .Where(v => !v.IsTemplate)
-                    .OrderBy(v => v.Name)
+                    .OfClass(typeof(View))
+                    .Cast<View>()
+                    .Where(v => !v.IsTemplate &&
+                                (v.ViewType == ViewType.Section  ||
+                                 v.ViewType == ViewType.Detail   ||
+                                 v.ViewType == ViewType.Elevation))
+                    .OrderBy(v => v.ViewType.ToString())   // group by type
+                    .ThenBy(v => v.Name)
                     .ToList();
 
                 bool activeAdded = false;
@@ -161,13 +165,15 @@ namespace HMVTools
 
                     sectionItems.Add(new SectionViewItem
                     {
-                        Name = viewCollector[i].Name,
+                        Name = string.Format("[{0}] {1}",
+                            viewCollector[i].ViewType.ToString().Substring(0, 3).ToUpper(),
+                            viewCollector[i].Name),
                         OriginalIndex = i,
-                        IsActiveView = isActive
+                        IsActiveView  = isActive
                     });
                 }
 
-                // If active view is not a section, insert at position 0
+                // If active view is not section/elevation/detail, insert at position 0
                 if (!activeAdded)
                 {
                     sectionViews.Insert(0, doc.ActiveView);
@@ -175,16 +181,16 @@ namespace HMVTools
 
                     sectionItems.Insert(0, new SectionViewItem
                     {
-                        Name = doc.ActiveView.Name,
+                        Name = string.Format("[ACT] {0}", doc.ActiveView.Name),
                         OriginalIndex = 0,
-                        IsActiveView = true
+                        IsActiveView  = true
                     });
                 }
 
                 if (sectionItems.Count == 0)
                 {
                     TaskDialog.Show("HMV Tools",
-                        "No se encontraron vistas de sección.");
+                        "No se encontraron vistas de sección, elevación o detalle.");
                     return Result.Failed;
                 }
 

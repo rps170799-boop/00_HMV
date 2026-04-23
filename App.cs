@@ -574,6 +574,29 @@ namespace HMVTools
             BitmapImage iconElc = LoadImage("HMVTools.Resources.electricalconect_32.png");
             if (iconElc != null) btnElc.LargeImage = iconElc;
 
+
+
+            // ── Electrical Tools Panel ──
+            RibbonPanel panelElectrical = app.CreateRibbonPanel("HMV Tools", "Electrical");
+
+            PushButtonData btnElecGeom = new PushButtonData(
+                "ElectricalGeometry",
+                "Electrical\nGeometry",
+                path,
+                "HMVTools.ElectricalGeometryCommand");
+
+            btnElecGeom.ToolTip = "Compare FlexPipe geometry with DXF files";
+            btnElecGeom.LongDescription =
+                "Scans a folder for DXF files and compares their Vano and Desnivel "
+                + "with the Flex Pipes in the model, matching them by a specified parameter. "
+                + "Generates a CSV report.";
+
+            PushButton btnEG = panelElectrical.AddItem(btnElecGeom) as PushButton;
+
+            // Note: Ensure you add a 32x32 icon named 'elec_geom_32.png' to your Resources!
+            BitmapImage iconEG = LoadImage("HMVTools.Resources.elec_geom_32.png");
+            if (iconEG != null) btnEG.LargeImage = iconEG;
+
             // ══════════════════════════════════════════════════════
             //  PROACTIVE TRACKING — Event subscriptions
             // ══════════════════════════════════════════════════════

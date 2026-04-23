@@ -171,8 +171,13 @@ namespace HMVTools
 
                     if (flexPipe != null && !string.IsNullOrEmpty(SharedParameterName))
                     {
-                        string dxfFileName = Path.GetFileName(DxfFilePath);
-                        SetParameterValue(flexPipe, SharedParameterName, dxfFileName);
+                        string dxfFileName = Path.GetFileNameWithoutExtension(DxfFilePath);
+                        int underscoreIdx = dxfFileName.IndexOf('_');
+                        string paramValue = underscoreIdx >= 0
+                            ? dxfFileName.Substring(0, underscoreIdx)
+                            : dxfFileName;
+
+                        SetParameterValue(flexPipe, SharedParameterName, paramValue);
                     }
 
                     trans.Commit();
@@ -321,24 +326,30 @@ namespace HMVTools
                 throw new InvalidOperationException("Points A and B are in the exact same position.");
 
             XYZ uRev = revVec.Normalize();
-
             XYZ horizontalNormal = uRev.CrossProduct(XYZ.BasisZ);
             XYZ vRev = horizontalNormal.GetLength() < 1e-9
                 ? XYZ.BasisX
                 : horizontalNormal.Normalize().CrossProduct(uRev).Normalize();
 
+            // ── Uniform scale: stretch DXF length to match model A→B distance ──
+            // Preserves the curve's aspect ratio in both axes.
+            // The last transformed point naturally lands on originB
+            // because: along(dxfEnd) * scale = dxfLen * (revLen/dxfLen) = revLen
+            // and: deviate(dxfEnd) = 0 by construction (uDxf points to dxfEnd).
             double scale = revLen / dxfLen;
 
             var transformed = new List<XYZ>();
             foreach (XYZ pt in dxfPoints)
             {
-                XYZ local = pt - dxfStart;
-                double along    = local.DotProduct(uDxf);
-                double deviate  = local.DotProduct(vDxf);
+                XYZ local      = pt - dxfStart;
+                double along   = local.DotProduct(uDxf);
+                double deviate = local.DotProduct(vDxf);
                 transformed.Add(originA + (uRev * along * scale) + (vRev * deviate * scale));
             }
 
+            // Float-error guard only — last point reaches originB naturally
             transformed[transformed.Count - 1] = originB;
+
             return transformed;
         }
 

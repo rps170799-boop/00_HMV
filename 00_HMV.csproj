@@ -138,6 +138,7 @@
     <Compile Include="Commands\Annotation\Genericannotationtagcommand.cs" />
     <Compile Include="Commands\Cloud\BatchCloudLinkCommand.cs" />
     <Compile Include="Commands\Electrical\ElectricalConnectionCommand.cs" />
+    <Compile Include="Commands\Electrical\ElectricalGeometryCommand.cs" />
     <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
@@ -190,6 +191,9 @@
     </Compile>
     <Compile Include="WindowUI\DWG\Dwg3DProgressWindow.xaml.cs">
       <DependentUpon>Dwg3DProgressWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Electrical\ElectricalGeometryWindow.xaml.cs">
+      <DependentUpon>ElectricalGeometryWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="WindowUI\Electrical\ConexionFlexPipeWindow.xaml.cs">
       <DependentUpon>ConexionFlexPipeWindow.xaml</DependentUpon>
@@ -281,6 +285,10 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="WindowUI\Electrical\ElectricalGeometryWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="WindowUI\Electrical\ConexionFlexPipeWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -300,6 +308,32 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
+    <EmbeddedResource Include="Resources\elec_geom_32.png" />
+    <Content Include="Resources\resources\alignspot_32.png" />
+    <Content Include="Resources\resources\annottag_32.png" />
+    <Content Include="Resources\resources\autodim_32.png" />
+    <Content Include="Resources\resources\constraints_32.png" />
+    <Content Include="Resources\resources\dimaudit_32.png" />
+    <Content Include="Resources\resources\ductos_32.png" />
+    <Content Include="Resources\resources\dwg3d_32.png" />
+    <Content Include="Resources\resources\dwg_32.png" />
+    <Content Include="Resources\resources\electricalconect_32.png" />
+    <Content Include="Resources\resources\familyaudit_32.png" />
+    <Content Include="Resources\resources\foundation_32.png" />
+    <Content Include="Resources\resources\gridlevel_32.png" />
+    <Content Include="Resources\resources\linkaudit_32.png" />
+    <Content Include="Resources\resources\linkcloud_32.png" />
+    <Content Include="Resources\resources\migrate_32.png" />
+    <Content Include="Resources\resources\multiparam_32.png" />
+    <Content Include="Resources\resources\pipeannotation_32.png" />
+    <Content Include="Resources\resources\refreshz_32.png" />
+    <Content Include="Resources\resources\sheetaudit_32.png" />
+    <Content Include="Resources\resources\signage_32.png" />
+    <Content Include="Resources\resources\spotelev_32.png" />
+    <Content Include="Resources\resources\textaudit_32.png" />
+    <Content Include="Resources\resources\topo_32.png" />
+    <Content Include="Resources\resources\transfer_units_32.png" />
+    <Content Include="Resources\resources\viewaudit_32.png" />
     <EmbeddedResource Include="Resources\electricalconect_32.png" />
     <EmbeddedResource Include="Resources\linkcloud_32.png" />
     <EmbeddedResource Include="Resources\transfer_units_32.png" />
