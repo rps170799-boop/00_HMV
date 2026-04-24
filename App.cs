@@ -576,9 +576,6 @@ namespace HMVTools
 
 
 
-            // ── Electrical Tools Panel ──
-            RibbonPanel panelElectrical = app.CreateRibbonPanel("HMV Tools", "Electrical");
-
             PushButtonData btnElecGeom = new PushButtonData(
                 "ElectricalGeometry",
                 "Electrical\nGeometry",
@@ -591,7 +588,7 @@ namespace HMVTools
                 + "with the Flex Pipes in the model, matching them by a specified parameter. "
                 + "Generates a CSV report.";
 
-            PushButton btnEG = panelElectrical.AddItem(btnElecGeom) as PushButton;
+            PushButton btnEG = panelElect.AddItem(btnElecGeom) as PushButton;
 
             // Note: Ensure you add a 32x32 icon named 'elec_geom_32.png' to your Resources!
             BitmapImage iconEG = LoadImage("HMVTools.Resources.elec_geom_32.png");
