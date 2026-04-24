@@ -50,6 +50,15 @@ namespace HMVTools
                     if (!dxfMap.ContainsKey(matchKey))
                         dxfMap.Add(matchKey, filePath);
                 }
+                Dictionary<string, (double vano, double desnivel)> dxfGeometry = new Dictionary<string, (double, double)>();
+                foreach (var kvp in dxfMap)
+                {
+                    ExtractDxfGeometry(kvp.Value, out double vano, out double desnivel);
+                    dxfGeometry[kvp.Key] = (vano, desnivel);
+                }
+
+
+
 
                 // 4. Get all Flex Pipes in model
                 var flexPipes = new FilteredElementCollector(doc)
@@ -61,6 +70,8 @@ namespace HMVTools
                 csvLines.Add("PARAMETER NAME ; dxf vano; dxf desnivel; rvt vano; rvt desnivel");
 
                 double ftToMm = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
+
+                HashSet<string> matchedKeys = new HashSet<string>();
 
                 // 5. Compare and extract
                 foreach (FlexPipe flex in flexPipes)
@@ -89,15 +100,13 @@ namespace HMVTools
                     string dxfDesnivelStr = "";
 
                     // Find matching DXF
-                    if (dxfMap.ContainsKey(paramValue))
+                    if (dxfGeometry.ContainsKey(paramValue))
                     {
-                        string dxfPath = dxfMap[paramValue];
-                        ExtractDxfGeometry(dxfPath, out double dxfVano, out double dxfDesnivel);
-                        dxfVanoStr = dxfVano.ToString("F2");
-                        dxfDesnivelStr = dxfDesnivel.ToString("F2");
-
+                        dxfVanoStr = dxfGeometry[paramValue].vano.ToString("F2");
+                        dxfDesnivelStr = dxfGeometry[paramValue].desnivel.ToString("F2");    
+                        matchedKeys.Add(paramValue);
                         // Remove from map to track "Not Found" ones later
-                        dxfMap.Remove(paramValue);
+                        dxfGeometry.Remove(paramValue);
                     }
 
                     // Output row
