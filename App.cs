@@ -594,6 +594,26 @@ namespace HMVTools
             BitmapImage iconEG = LoadImage("HMVTools.Resources.elec_geom_32.png");
             if (iconEG != null) btnEG.LargeImage = iconEG;
 
+            // ── Reshape FlexPipe ──────────────────────────────────────────────────
+            PushButtonData btnReshapeData = new PushButtonData(
+                "ReshapeFlexPipe",
+                "Reshape\nFlexPipe",
+                path,
+                "HMVTools.ReshapeFlexPipeCommand");
+            btnReshapeData.ToolTip = "Reshape an existing FlexPipe using a curve drawn in a Section/Detail view";
+            btnReshapeData.LongDescription =
+                "Replaces the shape of an existing FlexPipe:\n\n" +
+                "• Select the target FlexPipe in any view\n" +
+                "• Select one or more Lines/Curves drawn in a Section or Detail view\n" +
+                "• The pipe X/Y footprint is preserved — only the vertical profile changes\n" +
+                "• All shared parameters and system data are preserved";
+
+            PushButton btnReshape = panelElect.AddItem(btnReshapeData) as PushButton;
+            // Add a 32×32 PNG named 'reshape_flexpipe_32.png' to HMVTools.Resources
+            BitmapImage iconReshape = LoadImage("HMVTools.Resources.reshape_flexpipe_32.png");
+            if (iconReshape != null) btnReshape.LargeImage = iconReshape;
+
+
             // ══════════════════════════════════════════════════════
             //  PROACTIVE TRACKING — Event subscriptions
             // ══════════════════════════════════════════════════════

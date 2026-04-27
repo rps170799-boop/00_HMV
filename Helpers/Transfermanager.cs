@@ -239,10 +239,47 @@ namespace HMVTools
 
             if (flatIds.Count > 0)
             {
-                CopyViewBatch(source, target,
-                    flatIds, Transform.Identity,
-                    opts, viewMap, result,
-                    "Drafting/Legend", mode);
+                var legendIds   = new List<ElementId>();
+                var draftingIds = new List<ElementId>();
+
+                foreach (var id in flatIds)
+                {
+                    View v = source.GetElement(id) as View;
+                    if (v?.ViewType == ViewType.DraftingView)
+                        draftingIds.Add(id);
+                    else
+                        legendIds.Add(id);
+                }
+
+                // Drafting views: each needs its OWN standalone transaction
+                // — MUST NOT run inside CopyViewBatch's outer transaction
+                var draftSettings = new MigrationSettings
+                {
+                    TransferMode = mode,
+                    SheetOptions = new SheetCopyOptions()
+                };
+
+                foreach (var id in draftingIds)
+                {
+                    View srcV = source.GetElement(id) as View;
+                    if (srcV == null) continue;
+
+                    ElementId newId = CopyOrUpdateSingleView(
+                        source, target, srcV,
+                        Transform.Identity, result, draftSettings);
+
+                    if (newId != null && newId != ElementId.InvalidElementId)
+                        viewMap[id] = newId;
+                }
+
+                // Legends: go through normal batch
+                if (legendIds.Count > 0)
+                {
+                    CopyViewBatch(source, target,
+                        legendIds, Transform.Identity,
+                        opts, viewMap, result,
+                        "Legend", mode);
+                }
             }
 
             return viewMap;
@@ -321,18 +358,33 @@ namespace HMVTools
                     // ── CREATE MODE (or no match in Update) ───────
                     bool needsForcePath = false;
 
-                    if (srcV is ViewPlan srcPlan && srcPlan.GenLevel != null)
+                    // Drafting views MUST go through CopyOrUpdateSingleView
+                    // — doc-to-doc inside nested SubTransaction drops contents
+                    if (srcV != null && srcV.ViewType == ViewType.DraftingView)
                     {
-                        Level srcLev = source.GetElement(srcPlan.GenLevel.Id) as Level;
-                        if (srcLev != null)
+                        // Build a minimal MigrationSettings shell for mode
+                        // (reuse opts that were passed in via the outer method)
+                        var draftSettings = new MigrationSettings
                         {
-                            Level tgtLev = FindClosestLevel(target, srcLev.Elevation);
-                            if (tgtLev != null
-                                && Math.Abs(tgtLev.Elevation - srcLev.Elevation) < 0.01)
-                            {
-                                needsForcePath = true;
-                            }
+                            TransferMode = mode,
+                            SheetOptions = new SheetCopyOptions()
+                        };
+
+                        ElementId draftId = CopyOrUpdateSingleView(
+                            source, target, srcV,
+                            transform, result, draftSettings);
+
+                        if (draftId != null
+                            && draftId != ElementId.InvalidElementId)
+                        {
+                            viewMap[srcId] = draftId;
+                            batchSuccesses++;
                         }
+                        else
+                        {
+                            failures++;
+                        }
+                        continue; // skip the SubTransaction block below               }
                     }
                     else if (srcV is ViewSection)
                     {
@@ -579,8 +631,10 @@ namespace HMVTools
         public static void CopyViewProperties(
             View sourceView, View destView)
         {
+            // Scale
             try { destView.Scale = sourceView.Scale; } catch { }
 
+            // View Description
             try
             {
                 var srcParam = sourceView.get_Parameter(
@@ -594,7 +648,34 @@ namespace HMVTools
                 }
             }
             catch { }
+
+            // Detail Level (Coarse / Medium / Fine)
+            try
+            {
+                destView.DetailLevel = sourceView.DetailLevel;
+            }
+            catch { }
+
+            // Visual Style (Wireframe / Hidden / Shaded / etc.)
+            try
+            {
+                destView.DisplayStyle = sourceView.DisplayStyle;
+            }
+            catch { }
+
+            // Full CropBox (includes rotation for rotated plans)
+            try
+            {
+                if (sourceView.CropBoxActive)
+                {
+                    destView.CropBox = sourceView.CropBox;
+                    destView.CropBoxActive = true;
+                    destView.CropBoxVisible = sourceView.CropBoxVisible;
+                }
+            }
+            catch { }
         }
+
 
 
         // ═══════════════════════════════════════════════════════
@@ -659,10 +740,12 @@ namespace HMVTools
             return sheetMap;
         }
 
-        /// <summary>
-        /// Copies or updates a single sheet.
-        /// Mirrors pyRevit copy_sheet.
-        /// </summary>
+        // ───────────────────────────────────────────────────────────────
+        //  8. REPLACE: CopySingleSheet
+        //     Search: "private static ViewSheet CopySingleSheet"
+        //     Fix: viewport flow now always runs, better error handling
+        // ───────────────────────────────────────────────────────────────
+
         private static ViewSheet CopySingleSheet(
             Document source, Document target,
             ViewSheet srcSheet,
@@ -682,11 +765,6 @@ namespace HMVTools
             {
                 if (mode == ViewTransferMode.Update)
                 {
-                    // Update existing: clear and recopy contents
-                    result.Warnings.Add(
-                        $"Sheet '{srcSheet.SheetNumber}' exists "
-                        + "in target — updating contents.");
-
                     using (var t = new Transaction(target,
                         "HMV – Update Sheet Contents"))
                     {
@@ -700,8 +778,6 @@ namespace HMVTools
                 }
                 else
                 {
-                    // Create mode but sheet exists — skip content
-                    // copy, just report and proceed to viewports
                     result.Warnings.Add(
                         $"Sheet '{srcSheet.SheetNumber}' already "
                         + "exists in target.");
@@ -723,7 +799,8 @@ namespace HMVTools
                     }
                     else
                     {
-                        destSheet = ViewSheet.CreatePlaceholder(target);
+                        destSheet = ViewSheet.CreatePlaceholder(
+                            target);
                     }
 
                     try
@@ -743,26 +820,47 @@ namespace HMVTools
                 result.SheetsCreated++;
 
                 // Copy sheet-level content (title block, schedules)
+                // in a SEPARATE transaction after sheet creation
                 using (var t = new Transaction(target,
                     "HMV – Copy Sheet Contents"))
                 {
                     t.Start();
-                    CopyViewContentsViewToView(
-                        source, srcSheet, target, destSheet, opts);
-                    t.Commit();
+                    try
+                    {
+                        CopyViewContentsViewToView(
+                            source, srcSheet, target, destSheet, opts);
+                        t.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Sheet content copy failed: "
+                            + ex.Message);
+                    }
                 }
             }
 
             if (destSheet == null) return null;
 
             // ── Viewports ─────────────────────────────────────
+            // Always attempt viewport copy for non-placeholder sheets
             if (!destSheet.IsPlaceholder && opts.CopyViewports)
             {
-                CopySheetViewports(
-                    source, srcSheet,
-                    target, destSheet,
-                    coordTransform, viewMap,
-                    result, settings);
+                try
+                {
+                    CopySheetViewports(
+                        source, srcSheet,
+                        target, destSheet,
+                        coordTransform, viewMap,
+                        result, settings);
+                }
+                catch (Exception ex)
+                {
+                    result.Errors.Add(
+                        $"Viewport copy failed for sheet "
+                        + $"'{srcSheet.SheetNumber}': {ex.Message}");
+                }
             }
 
             // ── Guide grids ──────────────────────────────────
@@ -783,7 +881,9 @@ namespace HMVTools
         }
 
 
-        // ═══════════════════════════════════════════════════════
+
+
+        // ══════════════════════════════════════════════════════
         //  7a. COPY SHEET VIEWPORTS
         // ═══════════════════════════════════════════════════════
 
@@ -814,7 +914,8 @@ namespace HMVTools
                     as Viewport;
                 if (srcVport == null) continue;
 
-                View srcView = source.GetElement(srcVport.ViewId) as View;
+                View srcView = source.GetElement(srcVport.ViewId)
+                    as View;
                 if (srcView == null) continue;
 
                 // ── Copy or update the referenced view ────────
@@ -841,11 +942,10 @@ namespace HMVTools
                     continue;
                 }
 
-                // Check if view is already on another sheet
                 View destView = target.GetElement(destViewId) as View;
                 if (destView == null) continue;
 
-                // Check existing placement
+                // Skip if already on this sheet
                 if (existingViewIds.Contains(destViewId))
                 {
                     result.Warnings.Add(
@@ -855,7 +955,8 @@ namespace HMVTools
                 }
 
                 // Check if placed on a different sheet
-                string placedSheet = GetViewSheetNumber(target, destView);
+                string placedSheet = GetViewSheetNumber(
+                    target, destView);
                 if (placedSheet != null
                     && placedSheet != destSheet.SheetNumber)
                 {
@@ -869,7 +970,7 @@ namespace HMVTools
                 var srcData = CaptureViewportData(
                     source, srcVport, srcSheet);
 
-                // ── Place viewport on destination sheet ───────
+                // ── Place viewport ────────────────────────────
                 Viewport newVport = null;
                 using (var t = new Transaction(target,
                     "HMV – Place Viewport"))
@@ -882,6 +983,21 @@ namespace HMVTools
                             destSheet.Id,
                             destViewId,
                             srcData.BoxCenter);
+
+                        // Apply rotation BEFORE position correction
+                        if (srcData.Rotation != ViewportRotation.None)
+                        {
+                            try
+                            {
+                                newVport.Rotation = srcData.Rotation;
+                            }
+                            catch (Exception rex)
+                            {
+                                result.Warnings.Add(
+                                    $"Could not rotate viewport for "
+                                    + $"'{srcView.Name}': {rex.Message}");
+                            }
+                        }
 
                         // Preserve detail number
                         if (settings.SheetOptions.PreserveDetailNumbers)
@@ -913,23 +1029,43 @@ namespace HMVTools
                 ApplyLabelProperties(
                     target, newVport.Id, srcData, result);
 
-                // ── BBox position correction ──────────────────
+                // ── BBox position correction (AFTER rotation) ─
                 CorrectViewportByBBox(
                     target, newVport.Id, srcData, destSheet, result);
             }
         }
 
 
-        // ═══════════════════════════════════════════════════════
-        //  7b. SINGLE VIEW COPY/UPDATE FOR VIEWPORT REFS
-        // ═══════════════════════════════════════════════════════
 
-        /// <summary>
-        /// Copies or updates a single view referenced by a viewport.
-        /// Uses the same create/update logic but tailored for the
-        /// sheet-viewport workflow. Handles DrawingSheet, DraftingView,
-        /// Legend, and spatial views.
-        /// </summary>
+        // ═══════════════════════════════════════════════════════════════
+        //  REPLACE: CopyOrUpdateSingleView
+        //  Search: "private static ElementId CopyOrUpdateSingleView"
+        //  DELETE everything from that line until the closing brace.
+        //
+        //  ALSO DELETE these methods (no longer used):
+        //    - CopyViewDocToDoc
+        //    - TryForceCreateFallback
+        //    - CopyDraftingViewDocToDoc
+        //    - CopyLegendDocToDoc
+        //    - CreateDraftingView (old)
+        //    - CreateLegendView (old)
+        //
+        //  KEEP these methods (still used as fallbacks):
+        //    - ForceCreateView
+        //    - ForceCreatePlan
+        //    - ForceCreateSection
+        //    - FindViewFamilyTypeId
+        //
+        //  ADD: SwallowErrorsHandler class (outside TransferManager,
+        //       inside namespace HMVTools, after ViewportData class)
+        // ═══════════════════════════════════════════════════════════════
+
+
+        // ───────────────────────────────────────────────────────
+        //  PASTE THIS: CopyOrUpdateSingleView
+        //  (exact pyRevit copy_view pattern)
+        // ───────────────────────────────────────────────────────
+
         private static ElementId CopyOrUpdateSingleView(
             Document source, Document target,
             View srcView,
@@ -940,107 +1076,616 @@ namespace HMVTools
             ViewTransferMode mode = settings.TransferMode;
             var opts = settings.SheetOptions;
 
-            // Check for existing match
-            View existing = FindMatchingView(target, srcView);
+            // ── 1. CHECK FOR EXISTING VIEW (pyRevit: find_matching_view) ──
+            View matchingView = FindMatchingView(target, srcView);
 
-            if (existing != null && mode == ViewTransferMode.Update)
+            if (matchingView != null)
             {
-                // Update existing view contents
+                if (mode == ViewTransferMode.Update)
+                {
+                    // pyRevit: clear_view_contents + copy_view_contents
+                    using (var t = new Transaction(target,
+                        "HMV – Update View Contents"))
+                    {
+                        SetSwallowErrors(t);
+                        t.Start();
+                        ClearViewContents(target, matchingView, opts);
+                        CopyViewContentsViewToView(
+                            source, srcView, target, matchingView, opts);
+                        CopyViewProperties(srcView, matchingView);
+                        t.Commit();
+                    }
+                    result.ViewsUpdated++;
+                }
+                return matchingView.Id;
+            }
+
+            // ── 2. CREATE NEW VIEW (pyRevit: create based on type) ────
+            View newView = null;
+
+            if (srcView.ViewType == ViewType.DrawingSheet)
+            {
+                // Sheets handled separately
+                return ElementId.InvalidElementId;
+            }
+            else if (srcView.ViewType == ViewType.DraftingView)
+            {
+                result.Warnings.Add(
+                    $"[DEBUG] Drafting '{srcView.Name}': starting doc-to-doc copy.");
+
+                // Snapshot existing view IDs to find the new one
+                var existingIds = new HashSet<int>(
+                    new FilteredElementCollector(target)
+                        .OfClass(typeof(View))
+                        .Select(v => v.Id.IntegerValue));
+
+                result.Warnings.Add(
+                    $"[DEBUG] Drafting '{srcView.Name}': "
+                    + $"target has {existingIds.Count} existing views before copy.");
+
+                // Check source view contents BEFORE copying
+                var srcContents = new FilteredElementCollector(source, srcView.Id)
+                    .WhereElementIsNotElementType()
+                    .ToElementIds();
+                result.Warnings.Add(
+                    $"[DEBUG] Drafting '{srcView.Name}': "
+                    + $"source view has {srcContents.Count} elements.");
+
                 using (var t = new Transaction(target,
-                    "HMV – Update View Contents"))
+                    "HMV – Copy Drafting View"))
                 {
                     t.Start();
-                    ClearViewContents(target, existing, opts);
-                    CopyViewContentsViewToView(
-                        source, srcView, target, existing, opts);
-                    CopyViewProperties(srcView, existing);
-                    t.Commit();
-                }
-                result.ViewsUpdated++;
-                return existing.Id;
-            }
-            else if (existing != null && mode == ViewTransferMode.Create)
-            {
-                // View exists but user wants Create mode
-                // For views that can't be on multiple sheets, just
-                // reuse the existing one
-                result.Warnings.Add(
-                    $"View '{srcView.Name}' exists in target, reusing.");
-                return existing.Id;
-            }
+                    try
+                    {
+                        var cpOpts = new CopyPasteOptions();
+                        cpOpts.SetDuplicateTypeNamesHandler(
+                            new UseDestinationTypesHandler());
 
-            // ── Create new view ───────────────────────────────
-            ElementId newViewId = ElementId.InvalidElementId;
+                        var copied = ElementTransformUtils.CopyElements(
+                            source,
+                            new List<ElementId> { srcView.Id },
+                            target,
+                            Transform.Identity,
+                            cpOpts);
 
-            using (var t = new Transaction(target,
-                "HMV – Create View for Sheet"))
-            {
-                t.Start();
-
-                switch (srcView.ViewType)
-                {
-                    case ViewType.DraftingView:
-                        newViewId = CreateDraftingView(
-                            source, target, srcView, result);
-                        break;
-
-                    case ViewType.Legend:
-                        newViewId = CreateLegendView(
-                            source, target, srcView, result);
-                        break;
-
-                    case ViewType.FloorPlan:
-                    case ViewType.CeilingPlan:
-                        newViewId = ForceCreatePlan(
-                            source, target,
-                            srcView as ViewPlan, result);
-                        break;
-
-                    case ViewType.Section:
-                    case ViewType.Detail:
-                    case ViewType.Elevation:
-                        newViewId = ForceCreateSection(
-                            source, target,
-                            srcView as ViewSection, result);
-                        break;
-
-                    default:
                         result.Warnings.Add(
-                            $"Unsupported view type "
-                            + $"'{srcView.ViewType}' for "
-                            + $"'{srcView.Name}'.");
+                            $"[DEBUG] Drafting '{srcView.Name}': "
+                            + $"CopyElements returned {copied?.Count ?? 0} ids.");
+
+                        if (copied != null && copied.Count > 0)
+                        {
+                            foreach (var cid in copied)
+                            {
+                                Element el = target.GetElement(cid);
+                                bool isNew = !existingIds.Contains(cid.IntegerValue);
+                                result.Warnings.Add(
+                                    $"[DEBUG]   id={cid.IntegerValue} "
+                                    + $"type={el?.GetType().Name ?? "null"} "
+                                    + $"isNew={isNew}");
+                            }
+
+                            ElementId newId = copied.FirstOrDefault(id =>
+                                !existingIds.Contains(id.IntegerValue)
+                                && target.GetElement(id) is View);
+
+                            if (newId != null
+                                && newId != ElementId.InvalidElementId)
+                            {
+                                newView = target.GetElement(newId) as View;
+
+                                // Check contents of new view BEFORE commit
+                                var newContents = new FilteredElementCollector(
+                                        target, newId)
+                                    .WhereElementIsNotElementType()
+                                    .ToElementIds();
+                                result.Warnings.Add(
+                                    $"[DEBUG] Drafting '{srcView.Name}': "
+                                    + $"new view has {newContents.Count} elements before commit.");
+
+                                t.Commit();
+                                result.Warnings.Add(
+                                    $"[DEBUG] Drafting '{srcView.Name}': committed OK.");
+                            }
+                            else
+                            {
+                                t.RollBack();
+                                result.Warnings.Add(
+                                    $"[DEBUG] Drafting '{srcView.Name}': "
+                                    + "no new View found in copied ids — rolled back.");
+                            }
+                        }
+                        else
+                        {
+                            t.RollBack();
+                            result.Warnings.Add(
+                                $"[DEBUG] Drafting '{srcView.Name}': "
+                                + "CopyElements returned null or empty — rolled back.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
                         t.RollBack();
-                        return ElementId.InvalidElementId;
+                        result.Warnings.Add(
+                            $"[DEBUG] Drafting '{srcView.Name}' EXCEPTION: "
+                            + $"{ex.GetType().Name}: {ex.Message}");
+                    }
                 }
 
-                if (newViewId != ElementId.InvalidElementId)
+                // After transaction — check final state
+                if (newView != null)
                 {
-                    t.Commit();
-                    result.ViewsCreated++;
+                    var finalContents = new FilteredElementCollector(
+                            target, newView.Id)
+                        .WhereElementIsNotElementType()
+                        .ToElementIds();
+                    result.Warnings.Add(
+                        $"[DEBUG] Drafting '{srcView.Name}': "
+                        + $"final view '{newView.Name}' has {finalContents.Count} elements after commit.");
                 }
                 else
                 {
+                    result.Warnings.Add(
+                        $"[DEBUG] Drafting '{srcView.Name}': newView is null after transaction.");
+                }
+            }
+            else if (srcView.ViewType == ViewType.Legend)
+            {
+                // pyRevit: duplicate first legend
+                using (var t = new Transaction(target,
+                    "HMV – Create Legend View"))
+                {
+                    t.Start();
+                    try
+                    {
+                        View firstLegend =
+                            new FilteredElementCollector(target)
+                                .OfClass(typeof(View))
+                                .Cast<View>()
+                                .FirstOrDefault(v =>
+                                    v.ViewType == ViewType.Legend
+                                    && !v.IsTemplate);
+
+                        if (firstLegend != null)
+                        {
+                            ElementId newId = firstLegend.Duplicate(
+                                ViewDuplicateOption.Duplicate);
+                            newView = target.GetElement(newId) as View;
+                            if (newView != null)
+                            {
+                                newView.Name = GetUniqueViewName(
+                                    target, srcView.Name);
+                                CopyViewProperties(srcView, newView);
+                            }
+                        }
+                        else
+                        {
+                            result.Warnings.Add(
+                                "No legend in target to duplicate.");
+                        }
+                        t.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Error creating legend "
+                            + $"'{srcView.Name}': {ex.Message}");
+                    }
+                }
+            }
+            else if (srcView.ViewType == ViewType.FloorPlan
+                  || srcView.ViewType == ViewType.CeilingPlan)
+            {
+                using (var t = new Transaction(target,
+                    "HMV – Create Plan View"))
+                {
+                    t.Start();
+                    try
+                    {
+                        ElementId id = ForceCreatePlan(
+                            source, target,
+                            srcView as ViewPlan, result);
+                        if (id != ElementId.InvalidElementId)
+                            newView = target.GetElement(id) as View;
+                        t.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Error creating plan "
+                            + $"'{srcView.Name}': {ex.Message}");
+                    }
+                }
+            }
+            else if (srcView.ViewType == ViewType.Section
+                  || srcView.ViewType == ViewType.Detail
+                  || srcView.ViewType == ViewType.Elevation)
+            {
+                using (var t = new Transaction(target,
+                    "HMV – Create Section View"))
+                {
+                    t.Start();
+                    try
+                    {
+                        ElementId id = ForceCreateSection(
+                            source, target,
+                            srcView as ViewSection, result);
+                        if (id != ElementId.InvalidElementId)
+                            newView = target.GetElement(id) as View;
+                        t.Commit();
+                    }
+                    catch (Exception ex)
+                    {
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Error creating section "
+                            + $"'{srcView.Name}': {ex.Message}");
+                    }
+                }
+            }
+
+            if (newView == null)
+                return ElementId.InvalidElementId;
+
+            result.ViewsCreated++;
+
+            // ── 3. COPY VIEW CONTENTS (pyRevit: copy_view_contents) ──
+            // This is the KEY step. Uses swallow_errors = commit
+            // even if some elements fail to copy.
+            using (var t = new Transaction(target,
+                "HMV – Copy View Contents"))
+            {
+                SetSwallowErrors(t);
+                t.Start();
+
+                try
+                {
+                    var contentIds = GetViewContents(
+                        source, srcView, opts);
+
+                    if (contentIds.Count > 0)
+                    {
+                        var cpOpts = new CopyPasteOptions();
+                        cpOpts.SetDuplicateTypeNamesHandler(
+                            new UseDestinationTypesHandler());
+
+                        ElementTransformUtils.CopyElements(
+                            srcView,
+                            contentIds,
+                            newView,
+                            null,
+                            cpOpts);
+                    }
+                }
+                catch
+                {
+                    // Swallow — commit whatever succeeded
+                }
+
+                // ALWAYS COMMIT — this is swallow_errors=True
+                if (t.HasStarted() && !t.HasEnded())
+                {
+                    try { t.Commit(); }
+                    catch { try { t.RollBack(); } catch { } }
+                }
+            }
+
+            return newView.Id;
+        }
+
+        /// <summary>
+        /// Sets failure handling to swallow all warnings and
+        /// continue on non-fatal errors. Equivalent to pyRevit's
+        /// swallow_errors=True.
+        /// </summary>
+        private static void SetSwallowErrors(Transaction t)
+        {
+            var opts = t.GetFailureHandlingOptions();
+            opts.SetFailuresPreprocessor(
+                new SwallowErrorsHandler());
+            opts.SetClearAfterRollback(true);
+            t.SetFailureHandlingOptions(opts);
+        }
+
+
+        /// <summary>
+        /// Creates a view in the target using doc-to-doc CopyElements.
+        /// This is equivalent to copy/paste-aligned — preserves exact
+        /// geometry for sections, drafting views, legends, etc.
+        /// Returns the new view Id, or InvalidElementId if it fails.
+        /// </summary>
+        private static ElementId CopyViewDocToDoc(
+            Document source, Document target,
+            View srcView, Transform coordTransform,
+            TransferResult result)
+        {
+            var cpOpts = new CopyPasteOptions();
+            cpOpts.SetDuplicateTypeNamesHandler(
+                new UseDestinationTypesHandler());
+
+            // Choose transform: identity for flat views,
+            // coordTransform for spatial views
+            Transform xform = Transform.Identity;
+            switch (srcView.ViewType)
+            {
+                case ViewType.FloorPlan:
+                case ViewType.CeilingPlan:
+                case ViewType.Section:
+                case ViewType.Detail:
+                case ViewType.Elevation:
+                    // For spatial views with shared coords,
+                    // check if transform is near-identity
+                    if (coordTransform != null
+                        && coordTransform.Origin.GetLength() >= 0.001)
+                    {
+                        xform = coordTransform;
+                    }
+                    break;
+            }
+
+            // Snapshot existing view IDs
+            var existingIds = new HashSet<int>(
+                new FilteredElementCollector(target)
+                    .OfClass(typeof(View))
+                    .Select(v => v.Id.IntegerValue));
+
+            using (var t = new Transaction(target,
+                "HMV – Copy View Doc-to-Doc"))
+            {
+                t.Start();
+                try
+                {
+                    var copied = ElementTransformUtils.CopyElements(
+                        source,
+                        new List<ElementId> { srcView.Id },
+                        target,
+                        xform,
+                        cpOpts);
+
+                    if (copied != null && copied.Count > 0)
+                    {
+                        // Find the NEW view (not in the snapshot)
+                        ElementId newId = null;
+                        foreach (var id in copied)
+                        {
+                            if (!existingIds.Contains(id.IntegerValue))
+                            {
+                                Element el = target.GetElement(id);
+                                if (el is View)
+                                {
+                                    newId = id;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (newId != null)
+                        {
+                            t.Commit();
+                            return newId;
+                        }
+
+                        // CopyElements returned only existing IDs —
+                        // Revit reused an existing view instead of
+                        // creating a new one. Roll back.
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Doc-to-doc copy of '{srcView.Name}' "
+                            + "returned existing view, trying "
+                            + "fallback.");
+                        return ElementId.InvalidElementId;
+                    }
+
                     t.RollBack();
                     return ElementId.InvalidElementId;
                 }
-            }
-
-            // Copy contents into the new view
-            View newView = target.GetElement(newViewId) as View;
-            if (newView != null)
-            {
-                using (var t = new Transaction(target,
-                    "HMV – Copy View Contents"))
+                catch (Exception ex)
                 {
-                    t.Start();
-                    CopyViewContentsViewToView(
-                        source, srcView, target, newView, opts);
-                    t.Commit();
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Doc-to-doc copy of '{srcView.Name}' "
+                        + $"failed: {ex.Message}");
+                    return ElementId.InvalidElementId;
                 }
             }
-
-            return newViewId;
         }
+        /// <summary>
+        /// Fallback when doc-to-doc fails: uses ForceCreatePlan or
+        /// ForceCreateSection to reconstruct the view from geometry.
+        /// Only for spatial views — drafting/legend have no fallback.
+        /// </summary>
+        private static ElementId TryForceCreateFallback(
+            Document source, Document target,
+            View srcView, Transform coordTransform,
+            TransferResult result)
+        {
+            ElementId newId = ElementId.InvalidElementId;
+
+            using (var t = new Transaction(target,
+                "HMV – ForceCreate Fallback"))
+            {
+                t.Start();
+                try
+                {
+                    switch (srcView.ViewType)
+                    {
+                        case ViewType.FloorPlan:
+                        case ViewType.CeilingPlan:
+                            newId = ForceCreatePlan(
+                                source, target,
+                                srcView as ViewPlan, result);
+                            break;
+
+                        case ViewType.Section:
+                        case ViewType.Detail:
+                            newId = ForceCreateSection(
+                                source, target,
+                                srcView as ViewSection, result);
+                            break;
+
+                        case ViewType.Elevation:
+                            result.Warnings.Add(
+                                $"Elevation '{srcView.Name}' "
+                                + "cannot be created. Use Update "
+                                + "mode or place manually.");
+                            break;
+
+                        // Drafting/Legend: no fallback — doc-to-doc
+                        // is the only path.
+                        default:
+                            break;
+                    }
+
+                    if (newId != null
+                        && newId != ElementId.InvalidElementId)
+                    {
+                        t.Commit();
+                        return newId;
+                    }
+
+                    t.RollBack();
+                    return ElementId.InvalidElementId;
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Fallback create failed for "
+                        + $"'{srcView.Name}': {ex.Message}");
+                    return ElementId.InvalidElementId;
+                }
+            }
+        }
+
+
+        /// <summary>
+        /// Copies a DraftingView using doc-to-doc CopyElements.
+        /// This brings the view AND all its contents in one shot.
+        /// </summary>
+        private static ElementId CopyDraftingViewDocToDoc(
+            Document source, Document target,
+            View srcView, TransferResult result)
+        {
+            var cpOpts = new CopyPasteOptions();
+            cpOpts.SetDuplicateTypeNamesHandler(
+                new UseDestinationTypesHandler());
+
+            // Snapshot existing view IDs to find the new one
+            var existingIds = new HashSet<int>(
+                new FilteredElementCollector(target)
+                    .OfClass(typeof(View))
+                    .Select(v => v.Id.IntegerValue));
+
+            using (var t = new Transaction(target,
+                "HMV – Copy Drafting View"))
+            {
+                t.Start();
+                try
+                {
+                    var copied = ElementTransformUtils.CopyElements(
+                        source,
+                        new List<ElementId> { srcView.Id },
+                        target,
+                        Transform.Identity,
+                        cpOpts);
+
+                    if (copied != null && copied.Count > 0)
+                    {
+                        // Find the new view (not in the snapshot)
+                        ElementId newId = copied
+                            .FirstOrDefault(id =>
+                                !existingIds.Contains(id.IntegerValue)
+                                && target.GetElement(id) is View);
+
+                        if (newId == null)
+                            newId = copied.First();
+
+                        t.Commit();
+                        result.ViewsCreated++;
+                        return newId;
+                    }
+
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Drafting view '{srcView.Name}' copy "
+                        + "returned no elements.");
+                    return ElementId.InvalidElementId;
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Drafting view '{srcView.Name}' copy "
+                        + $"failed: {ex.Message}");
+                    return ElementId.InvalidElementId;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Copies a Legend view using doc-to-doc CopyElements.
+        /// </summary>
+        private static ElementId CopyLegendDocToDoc(
+            Document source, Document target,
+            View srcView, TransferResult result)
+        {
+            var cpOpts = new CopyPasteOptions();
+            cpOpts.SetDuplicateTypeNamesHandler(
+                new UseDestinationTypesHandler());
+
+            var existingIds = new HashSet<int>(
+                new FilteredElementCollector(target)
+                    .OfClass(typeof(View))
+                    .Select(v => v.Id.IntegerValue));
+
+            using (var t = new Transaction(target,
+                "HMV – Copy Legend View"))
+            {
+                t.Start();
+                try
+                {
+                    var copied = ElementTransformUtils.CopyElements(
+                        source,
+                        new List<ElementId> { srcView.Id },
+                        target,
+                        Transform.Identity,
+                        cpOpts);
+
+                    if (copied != null && copied.Count > 0)
+                    {
+                        ElementId newId = copied
+                            .FirstOrDefault(id =>
+                                !existingIds.Contains(id.IntegerValue)
+                                && target.GetElement(id) is View);
+
+                        if (newId == null)
+                            newId = copied.First();
+
+                        t.Commit();
+                        result.ViewsCreated++;
+                        return newId;
+                    }
+
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Legend '{srcView.Name}' copy "
+                        + "returned no elements.");
+                    return ElementId.InvalidElementId;
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Legend '{srcView.Name}' copy "
+                        + $"failed: {ex.Message}");
+                    return ElementId.InvalidElementId;
+                }
+            }
+        }
+
+
+
 
         /// <summary>
         /// Creates a DraftingView in the target document.
@@ -1220,19 +1865,26 @@ namespace HMVTools
         /// Mirrors pyRevit get_source_vport_data.
         /// </summary>
         public static ViewportData CaptureViewportData(
-            Document doc, Viewport vport, ViewSheet sheet)
+             Document doc, Viewport vport, ViewSheet sheet)
         {
             var data = new ViewportData
             {
                 BoxCenter = vport.GetBoxCenter()
             };
 
+            // Rotation
+            try { data.Rotation = vport.Rotation; }
+            catch { data.Rotation = ViewportRotation.None; }
+
+            // Label offset (Revit 2022+)
             try { data.LabelOffset = vport.LabelOffset; }
-            catch { /* Revit 2022+ only */ }
+            catch { }
 
+            // Label line length (Revit 2022+)
             try { data.LabelLineLength = vport.LabelLineLength; }
-            catch { /* Revit 2022+ only */ }
+            catch { }
 
+            // Bounding box on sheet (includes view title)
             try
             {
                 BoundingBoxXYZ bb = vport.get_BoundingBox(sheet);
@@ -1246,6 +1898,7 @@ namespace HMVTools
 
             return data;
         }
+
 
         /// <summary>
         /// Sets label offset and line length on destination viewport.
@@ -1353,7 +2006,8 @@ namespace HMVTools
                 {
                     string val = param.AsString();
                     if (!string.IsNullOrEmpty(val)
-                        && val != "---")
+                    && val != "---"
+                    && !val.StartsWith("Not ", StringComparison.OrdinalIgnoreCase))
                         return val;
                 }
             }
@@ -2039,7 +2693,7 @@ namespace HMVTools
 
         // ═══════════════════════════════════════════════════════
         //  HELPERS: ForceCreate, Level matching, Unique names
-        // ═══════════════════════════════════════════════════════
+        // ══════════════════════════════════════════════
 
         private static ElementId ForceCreateView(
             Document source, Document target,
@@ -2070,12 +2724,18 @@ namespace HMVTools
             Document source, Document target,
             ViewPlan srcPlan, TransferResult result)
         {
-            Level srcLevel = source.GetElement(srcPlan.GenLevel.Id) as Level;
+            if (srcPlan == null || srcPlan.GenLevel == null)
+                return ElementId.InvalidElementId;
+
+            Level srcLevel = source.GetElement(
+                srcPlan.GenLevel.Id) as Level;
             if (srcLevel == null) return ElementId.InvalidElementId;
 
-            Level tgtLevel = FindClosestLevel(target, srcLevel.Elevation);
+            Level tgtLevel = FindClosestLevel(
+                target, srcLevel.Elevation);
             if (tgtLevel == null) return ElementId.InvalidElementId;
 
+            // Find existing ViewPlan on that level to duplicate
             ViewPlan existingView = new FilteredElementCollector(target)
                 .OfClass(typeof(ViewPlan))
                 .Cast<ViewPlan>()
@@ -2100,17 +2760,16 @@ namespace HMVTools
 
             newView.Name = GetUniqueViewName(target, srcPlan.Name);
 
-            if (srcPlan.CropBoxActive)
+            // ── Full CropBox copy (includes rotation transform) ──
+            try
             {
-                try
-                {
-                    newView.CropBox = srcPlan.CropBox;
-                    newView.CropBoxActive = true;
-                    newView.CropBoxVisible = srcPlan.CropBoxVisible;
-                }
-                catch { }
+                newView.CropBox = srcPlan.CropBox;
+                newView.CropBoxActive = srcPlan.CropBoxActive;
+                newView.CropBoxVisible = srcPlan.CropBoxVisible;
             }
+            catch { }
 
+            // ── View range ───────────────────────────────────────
             try
             {
                 PlanViewRange srcRange = srcPlan.GetViewRange();
@@ -2127,7 +2786,8 @@ namespace HMVTools
             }
             catch { }
 
-            try { newView.Scale = srcPlan.Scale; } catch { }
+            // ── Scale, DetailLevel, DisplayStyle, Description ────
+            CopyViewProperties(srcPlan, newView);
 
             return newView.Id;
         }
@@ -2136,45 +2796,193 @@ namespace HMVTools
             Document source, Document target,
             ViewSection srcSection, TransferResult result)
         {
-            ViewFamily vf = srcSection.ViewType == ViewType.Detail
-                ? ViewFamily.Detail : ViewFamily.Section;
-
-            ElementId vftId = new FilteredElementCollector(target)
-                .OfClass(typeof(ViewFamilyType))
-                .Cast<ViewFamilyType>()
-                .Where(x => x.ViewFamily == vf)
-                .Select(x => x.Id)
-                .FirstOrDefault();
-
-            if (vftId == null || vftId == ElementId.InvalidElementId)
+            if (srcSection == null)
                 return ElementId.InvalidElementId;
 
-            Transform coordTransform =
-                ComputeSharedCoordinateTransform(source, target);
+            if (srcSection.ViewType == ViewType.Elevation)
+            {
+                result.Warnings.Add(
+                    $"Elevation '{srcSection.Name}' cannot be created "
+                    + "programmatically. Use Update mode or place manually.");
+                return ElementId.InvalidElementId;
+            }
 
-            BoundingBoxXYZ srcBox = srcSection.CropBox;
-            Transform srcT = srcBox.Transform;
+            // ── STEP 1: Find donor section to duplicate ───────────
+            ViewSection donor = new FilteredElementCollector(target)
+                .OfClass(typeof(ViewSection))
+                .Cast<ViewSection>()
+                .FirstOrDefault(v =>
+                    !v.IsTemplate
+                    && v.ViewType == srcSection.ViewType);
 
-            BoundingBoxXYZ tgtBox = new BoundingBoxXYZ();
+            if (donor == null)
+            {
+                donor = new FilteredElementCollector(target)
+                    .OfClass(typeof(ViewSection))
+                    .Cast<ViewSection>()
+                    .FirstOrDefault(v => !v.IsTemplate);
+            }
 
-            Transform newT = Transform.Identity;
-            newT.Origin = coordTransform.OfPoint(srcT.Origin);
-            newT.BasisX = coordTransform.OfVector(srcT.BasisX).Normalize();
-            newT.BasisY = coordTransform.OfVector(srcT.BasisY).Normalize();
-            newT.BasisZ = coordTransform.OfVector(srcT.BasisZ).Normalize();
+            if (donor == null)
+            {
+                result.Warnings.Add(
+                    $"No existing section in target to duplicate "
+                    + $"for '{srcSection.Name}'. "
+                    + "Create at least one section manually in the target.");
+                return ElementId.InvalidElementId;
+            }
 
-            tgtBox.Transform = newT;
-            tgtBox.Min = srcBox.Min;
-            tgtBox.Max = srcBox.Max;
-            tgtBox.Enabled = true;
+            // ── STEP 1: Snapshot existing OST_Viewers before duplicate ──
+            var existingViewerIds = new HashSet<int>(
+                new FilteredElementCollector(target)
+                    .OfCategory(BuiltInCategory.OST_Viewers)
+                    .WhereElementIsNotElementType()
+                    .ToElementIds()
+                    .Select(id => id.IntegerValue));
 
-            ViewSection newView = ViewSection.CreateSection(
-                target, vftId, tgtBox);
+            // ── STEP 2: Duplicate + set CropBox ──────────────────
+            ViewSection newView = null;
+            using (var t = new Transaction(target, "HMV – Duplicate Section"))
+            {
+                t.Start();
+                try
+                {
+                    ElementId newId = donor.Duplicate(
+                        ViewDuplicateOption.Duplicate);
+                    newView = target.GetElement(newId) as ViewSection;
 
-            newView.Name = GetUniqueViewName(target, srcSection.Name);
-            newView.CropBoxActive = srcSection.CropBoxActive;
-            newView.CropBoxVisible = srcSection.CropBoxVisible;
-            try { newView.Scale = srcSection.Scale; } catch { }
+                    if (newView == null)
+                    {
+                        t.RollBack();
+                        result.Warnings.Add(
+                            $"Duplicate failed for '{srcSection.Name}'.");
+                        return ElementId.InvalidElementId;
+                    }
+
+                    newView.Name = GetUniqueViewName(target, srcSection.Name);
+
+                    newView.CropBox        = srcSection.CropBox;
+                    newView.CropBoxActive  = srcSection.CropBoxActive;
+                    newView.CropBoxVisible = srcSection.CropBoxVisible;
+
+                    t.Commit();
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    result.Warnings.Add(
+                        $"Section duplicate/cropbox failed for "
+                        + $"'{srcSection.Name}': {ex.Message}");
+                    return ElementId.InvalidElementId;
+                }
+            }
+
+            // ── STEP 3: Compute delta ─────────────────────────────
+            XYZ srcOrigin  = srcSection.CropBox.Transform.Origin;
+            XYZ destOrigin = newView.CropBox.Transform.Origin;
+            XYZ delta      = srcOrigin - destOrigin;
+
+            result.Warnings.Add(
+                $"[DEBUG-SEC] '{srcSection.Name}': "
+                + $"delta=({delta.X:F4},{delta.Y:F4},{delta.Z:F4})");
+
+            // ── STEP 4: Find NEW viewer by snapshot diff ──────────
+            bool needsMove = delta.GetLength() > 1e-4;
+
+            if (needsMove)
+            {
+                Element viewer = new FilteredElementCollector(target)
+                    .OfCategory(BuiltInCategory.OST_Viewers)
+                    .WhereElementIsNotElementType()
+                    .ToElements()
+                    .FirstOrDefault(e =>
+                        !existingViewerIds.Contains(e.Id.IntegerValue));
+
+                if (viewer != null)
+                {
+                    using (var t = new Transaction(target,
+                        "HMV – Move Section to Correct Position"))
+                    {
+                        t.Start();
+                        try
+                        {
+                            ElementTransformUtils.MoveElement(
+                                target, viewer.Id, delta);
+                            t.Commit();
+                            result.Warnings.Add(
+                                $"[DEBUG-SEC] '{srcSection.Name}': moved OK.");
+                        }
+                        catch (Exception ex)
+                        {
+                            t.RollBack();
+                            result.Warnings.Add(
+                                $"[DEBUG-SEC] '{srcSection.Name}': "
+                                + $"move failed: {ex.Message}");
+                        }
+                    }
+                }
+                else
+                {
+                    result.Warnings.Add(
+                        $"[DEBUG-SEC] '{srcSection.Name}': "
+                        + "new OST_Viewers element not found.");
+                }
+            }
+
+            // ── STEP 5: Copy scale/properties (NO CropBox here) ──
+            // CopyViewProperties sets CropBox again — we skip that
+            // by calling only the individual properties we need.
+            try { newView.Scale       = srcSection.Scale;       } catch { }
+            try { newView.DetailLevel = srcSection.DetailLevel; } catch { }
+            try { newView.DisplayStyle= srcSection.DisplayStyle;} catch { }
+            try
+            {
+                var sp = srcSection.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION);
+                var dp = newView.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION);
+                if (sp != null && dp != null && !dp.IsReadOnly)
+                    dp.Set(sp.AsString() ?? "");
+            }
+            catch { }
+
+            // ── STEP 6: Copy view contents (annotations, dims, etc.) ──
+            using (var t = new Transaction(target, "HMV – Copy Section Contents"))
+            {
+                SetSwallowErrors(t);
+                t.Start();
+                try
+                {
+                    var contentIds = GetViewContents(
+                        source, srcSection, new SheetCopyOptions());
+
+                    if (contentIds.Count > 0)
+                    {
+                        var cpOpts = new CopyPasteOptions();
+                        cpOpts.SetDuplicateTypeNamesHandler(
+                            new UseDestinationTypesHandler());
+
+                        ElementTransformUtils.CopyElements(
+                            srcSection,
+                            contentIds,
+                            newView,
+                            null,
+                            cpOpts);
+
+                        result.Warnings.Add(
+                            $"[DEBUG-SEC] '{srcSection.Name}': "
+                            + $"copied {contentIds.Count} content elements.");
+                    }
+                }
+                catch
+                {
+                    // Swallow — commit whatever succeeded
+                }
+
+                if (t.HasStarted() && !t.HasEnded())
+                {
+                    try { t.Commit(); }
+                    catch { try { t.RollBack(); } catch { } }
+                }
+            }
 
             return newView.Id;
         }
@@ -2221,5 +3029,34 @@ namespace HMVTools
         public double? LabelLineLength { get; set; }
         public XYZ BBoxMin { get; set; }
         public XYZ BBoxMax { get; set; }
+        public ViewportRotation Rotation { get; set; } = ViewportRotation.None;
+    }
+    public class SwallowErrorsHandler : IFailuresPreprocessor
+    {
+        public FailureProcessingResult PreprocessFailures(
+            FailuresAccessor failuresAccessor)
+        {
+            var failures = failuresAccessor.GetFailureMessages();
+
+            foreach (var f in failures)
+            {
+                // Delete warnings (non-critical)
+                if (f.GetSeverity() == FailureSeverity.Warning)
+                {
+                    failuresAccessor.DeleteWarning(f);
+                }
+                // Try to resolve errors
+                else if (f.HasResolutions())
+                {
+                    failuresAccessor.ResolveFailure(f);
+                }
+                else
+                {
+                    failuresAccessor.DeleteWarning(f);
+                }
+            }
+
+            return FailureProcessingResult.Continue;
+        }
     }
 }

@@ -1,0 +1,124 @@
+<Window x:Class="HMVTools.ReshapeFlexPipeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools – Reshape FlexPipe"
+        Height="360" Width="460"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="White"
+        FontFamily="Roboto, Arial, Segoe UI">
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="60"/>
+            </Grid.RowDefinitions>
+
+            <!-- ── Title bar ── -->
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White"   Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="40"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV "          Foreground="White"   FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros"    Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" – Reshape FlexPipe from Section" Foreground="White"
+                               FontSize="10" Margin="5,2,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="✕" FontSize="12" Foreground="White"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                        Click="BtnClose_Click"/>
+            </Grid>
+
+            <!-- ── Content ── -->
+            <StackPanel Grid.Row="1" Margin="20,18,20,10">
+
+                <!-- Step 1 -->
+                <TextBlock Text="1. Select the FlexPipe to reshape"
+                           FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="90"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="lblFlexPipe"
+                               Text="Not selected"
+                               FontSize="10" Foreground="#1E1E1E" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="Pick FlexPipe"
+                            FontSize="10" Height="26"
+                            Background="#004982" Foreground="White"
+                            BorderThickness="0" Cursor="Hand"
+                            Click="BtnPickFlexPipe_Click"/>
+                </Grid>
+
+                <!-- Step 2 -->
+                <TextBlock Text="2. Select the new path curve(s) in the Section view"
+                           FontSize="10" Foreground="#787882" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="90"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="lblCurves"
+                               Text="Not selected"
+                               FontSize="10" Foreground="#1E1E1E" VerticalAlignment="Center"/>
+                    <Button Grid.Column="1" Content="Pick Curve(s)"
+                            FontSize="10" Height="26"
+                            Background="#004982" Foreground="White"
+                            BorderThickness="0" Cursor="Hand"
+                            Click="BtnPickCurves_Click"/>
+                </Grid>
+
+                <!-- Resample interval -->
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="70"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Resample interval (ft):"
+                               FontSize="10" Foreground="#787882" VerticalAlignment="Center"/>
+                    <TextBox x:Name="txtInterval" Text="0.5"
+                             Grid.Column="1" Height="24"
+                             FontSize="10" VerticalContentAlignment="Center"
+                             Padding="4,0" TextAlignment="Center"/>
+                </Grid>
+
+                <!-- Status -->
+                <TextBlock x:Name="txtStatus"
+                           Text="Ready. Open a Section / Detail view first."
+                           FontSize="10" Foreground="#004982"
+                           FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            </StackPanel>
+
+            <!-- ── Footer buttons ── -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Margin="0,0,20,0">
+
+                <Button Content="Cancel" FontSize="10" Height="30" Width="80"
+                        Background="#F0F0F3" Foreground="#3C3C3C"
+                        BorderThickness="0" Cursor="Hand"
+                        Margin="0,0,10,0" Click="BtnClose_Click"/>
+
+                <Button Content="Reshape FlexPipe" FontSize="10" FontWeight="Bold"
+                        Height="30" Width="130"
+                        Background="#E9AA00" Foreground="White"
+                        BorderThickness="0" Cursor="Hand"
+                        Click="BtnRun_Click"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

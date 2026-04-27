@@ -139,6 +139,7 @@
     <Compile Include="Commands\Cloud\BatchCloudLinkCommand.cs" />
     <Compile Include="Commands\Electrical\ElectricalConnectionCommand.cs" />
     <Compile Include="Commands\Electrical\ElectricalGeometryCommand.cs" />
+    <Compile Include="Commands\Electrical\ReshapeFlexPipeCommand.cs" />
     <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
     <Compile Include="Commands\Annotation\Spotelevationcommand.cs" />
@@ -197,6 +198,9 @@
     </Compile>
     <Compile Include="WindowUI\Electrical\ConexionFlexPipeWindow.xaml.cs">
       <DependentUpon>ConexionFlexPipeWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Electrical\ReshapeFlexPipeWindow.xaml.cs">
+      <DependentUpon>ReshapeFlexPipeWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.xaml.cs">
       <DependentUpon>ConstraintsReleaseWindow.xaml</DependentUpon>
@@ -293,6 +297,9 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="WindowUI\Electrical\ReshapeFlexPipeWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="WindowUI\FamilyControl\ConstraintsReleaseWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -309,6 +316,7 @@
   <ItemGroup>
     <Content Include="docs\img\HMVlogo.png" />
     <EmbeddedResource Include="Resources\elec_geom_32.png" />
+    <EmbeddedResource Include="Resources\reshape_flexpipe_32.png" />
     <Content Include="Resources\resources\alignspot_32.png" />
     <Content Include="Resources\resources\annottag_32.png" />
     <Content Include="Resources\resources\autodim_32.png" />
