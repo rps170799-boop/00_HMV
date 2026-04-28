@@ -118,7 +118,8 @@ namespace HMVTools
             Document target,
             ICollection<ElementId> elementIds,
             Transform coordTransform,
-            TransferResult result)
+            TransferResult result,
+            string groupName = "HMV – Imported Model Elements")
         {
             var validIds = new List<ElementId>();
 
@@ -160,6 +161,53 @@ namespace HMVTools
                         coordTransform, opts);
 
                     result.ElementsCopied = copied.Count;
+
+                    // ── Group all copied model elements ───────────────
+                    if (copied.Count > 0)
+                    {
+                        try
+                        {
+                            Group grp = target.Create.NewGroup(copied);
+
+                            // Rename the group type if possible
+                            if (grp != null)
+                            {
+                                GroupType grpType =
+                                    target.GetElement(grp.GetTypeId())
+                                        as GroupType;
+
+                                if (grpType != null)
+                                {
+                                    // Ensure name is unique
+                                    string uniqueName = groupName;
+                                    var existingNames = new HashSet<string>(
+                                        new FilteredElementCollector(target)
+                                            .OfClass(typeof(GroupType))
+                                            .Cast<GroupType>()
+                                            .Select(g => g.Name));
+
+                                    int n = 2;
+                                    while (existingNames.Contains(uniqueName))
+                                        uniqueName = $"{groupName} ({n++})";
+
+                                    grpType.Name = uniqueName;
+                                }
+
+                                result.Warnings.Add(
+                                    $"Model elements grouped: "
+                                    + $"{copied.Count} elements → "
+                                    + $"Group '{grpType?.Name ?? "(unnamed)"}' "
+                                    + $"(Id {grp.Id.IntegerValue})");
+                            }
+                        }
+                        catch (Exception gex)
+                        {
+                            result.Warnings.Add(
+                                $"Elements copied but grouping failed: "
+                                + gex.Message);
+                        }
+                    }
+
                     t.Commit();
                     return copied;
                 }
@@ -1608,11 +1656,8 @@ namespace HMVTools
                 case ViewType.Elevation:
                     // For spatial views with shared coords,
                     // check if transform is near-identity
-                    if (coordTransform != null
-                        && coordTransform.Origin.GetLength() >= 0.001)
-                    {
+                    if (coordTransform != null)
                         xform = coordTransform;
-                    }
                     break;
             }
 
