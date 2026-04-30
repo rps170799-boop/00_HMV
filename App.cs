@@ -594,6 +594,27 @@ namespace HMVTools
             BitmapImage iconEG = LoadImage("HMVTools.Resources.elec_geom_32.png");
             if (iconEG != null) btnEG.LargeImage = iconEG;
 
+            // ── Electrical Flow · Information ────────────────────────────────────
+            PushButtonData btnFlowData = new PushButtonData(
+                "ElectricalFlow",
+                "Electrical Flow\nInformation",
+                path,
+                "HMVTools.ElectricalFlowCommand");
+            btnFlowData.ToolTip = "Batch-assign Connection Numbers and export Vano/Desnivel CSV";
+            btnFlowData.LongDescription =
+                "Groups adaptive component points into ordered rows, assigns sequential "
+                + "Connection Numbers (CN), maps the nearest Electrical Equipment name, "
+                + "and exports a Vano / Desnivel CSV report.\n\n"
+                + "Workflow:\n"
+                + "1. Click '+ Add Group' and select adaptive points for each group.\n"
+                + "2. Use ← → ↑ ↓ toggles to set the sort axis per group.\n"
+                + "3. Enable 🔗 Padlock to chain the last point of a group to the next.\n"
+                + "4. Open ⚙ Config to map source/destination parameters.\n"
+                + "5. Click Export / Execute to write parameters and save CSV.";
+            PushButton btnFlow = panelElect.AddItem(btnFlowData) as PushButton;
+            BitmapImage iconFlow = LoadImage("HMVTools.Resources.electrical_flow_i_32.png");
+            if (iconFlow != null) btnFlow.LargeImage = iconFlow;
+
             // ── Reshape FlexPipe ──────────────────────────────────────────────────
             PushButtonData btnReshapeData = new PushButtonData(
                 "ReshapeFlexPipe",

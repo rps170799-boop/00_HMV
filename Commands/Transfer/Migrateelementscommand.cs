@@ -99,24 +99,27 @@ namespace HMVTools
 
             string warning;
             if (!SheetHelpers.ValidateTransform(
-                    coordTransform, out warning)
-                && warning != null)
+                    coordTransform, out warning))
             {
                 var td = new TaskDialog(
                     "HMV Tools – Coordinate Warning");
                 td.MainInstruction =
                     "Shared coordinates issue detected";
                 td.MainContent = warning
-                    + "\n\nDo you want to proceed anyway?";
-                td.CommonButtons =
-                    TaskDialogCommonButtons.Yes
-                    | TaskDialogCommonButtons.No;
-                if (td.Show() != TaskDialogResult.Yes)
+                    + "\n\nIf the models share the same survey point "
+                    + "and are co-located, choose 'Use Identity' to "
+                    + "copy without any coordinate offset.\n\n"
+                    + "Choose 'Cancel' to abort.";
+                td.AddCommandLink(
+                    TaskDialogCommandLinkId.CommandLink1,
+                    "Use Identity Transform",
+                    "Copy elements with no coordinate offset (models are co-located).");
+                td.CommonButtons = TaskDialogCommonButtons.Cancel;
+                TaskDialogResult tdResult = td.Show();
+                if (tdResult == TaskDialogResult.CommandLink1)
+                    coordTransform = Transform.Identity;
+                else
                     return Result.Cancelled;
-            }
-            else if (warning != null)
-            {
-                TaskDialog.Show("HMV Tools – Warning", warning);
             }
 
             // ═══════════════════════════════════════════════════

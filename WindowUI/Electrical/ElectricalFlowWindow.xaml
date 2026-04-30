@@ -1,0 +1,197 @@
+<Window x:Class="HMVTools.ElectricalFlowWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - Electrical Flow"
+        Height="540" Width="540"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="White"
+        FontFamily="Roboto, Arial, Segoe UI">
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="60"/>
+            </Grid.RowDefinitions>
+
+            <!-- ── Title Bar ── -->
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White"   Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="40"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White"   FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" - Electrical Flow · Information" Foreground="White"
+                               FontSize="10" Margin="5,2,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <Button Grid.Column="1" Content="✕" FontSize="12" Foreground="White"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                        Click="BtnClose_Click"/>
+            </Grid>
+
+            <!-- ── Body ── -->
+            <Grid Grid.Row="1" Margin="20,14,20,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Section header + Add button -->
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="Point Groups" FontSize="10" Foreground="#787882"
+                               FontWeight="SemiBold" VerticalAlignment="Center"/>
+
+                    <Button Grid.Column="1" Content="⚙ Config" FontSize="10"
+                            Height="26" Padding="10,0" Margin="0,0,8,0"
+                            Background="#5A7FA8" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Click="BtnConfig_Click"
+                            ToolTip="Open parameter mapping configuration"/>
+
+                    <Button Grid.Column="2" Content="+ Add Group" FontSize="10"
+                            Height="26" Padding="10,0"
+                            Background="#004982" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Click="BtnAddGroup_Click"
+                            ToolTip="Select adaptive components to add a new group"/>
+                </Grid>
+
+                <!-- Groups list -->
+                <Border Grid.Row="1" BorderBrush="#C8C8D2" BorderThickness="1">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="lstGroups">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- One row per group -->
+                                    <Border BorderBrush="#E0E0E8" BorderThickness="0,0,0,1"
+                                            Padding="10,6">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <!-- Label -->
+                                                <ColumnDefinition Width="*"/>
+                                                <!-- X axis toggles -->
+                                                <ColumnDefinition Width="Auto"/>
+                                                <!-- Y axis toggles -->
+                                                <ColumnDefinition Width="Auto"/>
+                                                <!-- Padlock -->
+                                                <ColumnDefinition Width="Auto"/>
+                                                <!-- Remove -->
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- Group label -->
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding DisplayLabel}"
+                                                       FontSize="10" Foreground="#1E1E1E"
+                                                       VerticalAlignment="Center"/>
+
+                                            <!-- X axis: Right / Left
+                                                 IsChecked = OneWay (model → visual only)
+                                                 Click     = user interaction only (never fires on programmatic IsChecked changes) -->
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                        VerticalAlignment="Center" Margin="8,0">
+                                                <CheckBox IsChecked="{Binding SortRight, Mode=OneWay}"
+                                                          Content="→" FontSize="12"
+                                                          VerticalContentAlignment="Center"
+                                                          Margin="0,0,4,0"
+                                                          Tag="{Binding}"
+                                                          ToolTip="Sort by X ascending (Right)"
+                                                          Click="ChkSortRight_Click"/>
+                                                <CheckBox IsChecked="{Binding SortLeft, Mode=OneWay}"
+                                                          Content="←" FontSize="12"
+                                                          VerticalContentAlignment="Center"
+                                                          Tag="{Binding}"
+                                                          ToolTip="Sort by X descending (Left)"
+                                                          Click="ChkSortLeft_Click"/>
+                                            </StackPanel>
+
+                                            <!-- Y axis: Up / Down -->
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                        VerticalAlignment="Center" Margin="0,0,8,0">
+                                                <CheckBox IsChecked="{Binding SortUp, Mode=OneWay}"
+                                                          Content="↑" FontSize="12"
+                                                          VerticalContentAlignment="Center"
+                                                          Margin="0,0,4,0"
+                                                          Tag="{Binding}"
+                                                          ToolTip="Sort by Y ascending (Up)"
+                                                          Click="ChkSortUp_Click"/>
+                                                <CheckBox IsChecked="{Binding SortDown, Mode=OneWay}"
+                                                          Content="↓" FontSize="12"
+                                                          VerticalContentAlignment="Center"
+                                                          Tag="{Binding}"
+                                                          ToolTip="Sort by Y descending (Down)"
+                                                          Click="ChkSortDown_Click"/>
+                                            </StackPanel>
+
+                                            <!-- Padlock -->
+                                            <CheckBox Grid.Column="3"
+                                                      IsChecked="{Binding LinkedToNext, Mode=TwoWay}"
+                                                      Content="🔗" FontSize="13"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,8,0"
+                                                      ToolTip="Link last point of this group to the first point of the next group"/>
+
+                                            <!-- Remove row button -->
+                                            <Button Grid.Column="4" Content="✕"
+                                                    FontSize="10" Width="22" Height="22"
+                                                    Background="#E8E8F0" Foreground="#3C3C3C"
+                                                    BorderThickness="0" Cursor="Hand"
+                                                    Tag="{Binding}"
+                                                    Click="BtnRemoveGroup_Click"
+                                                    ToolTip="Remove this group"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Status bar -->
+                <TextBlock Grid.Row="2"
+                           x:Name="txtStatus"
+                           Text="Ready. Add groups then click Export."
+                           FontSize="10" Foreground="#004982" FontWeight="SemiBold"
+                           Margin="0,8,0,0" TextWrapping="Wrap"/>
+            </Grid>
+
+            <!-- ── Footer buttons ── -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal"
+                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Margin="0,0,20,0">
+
+                <Button Content="Clear All" FontSize="10" Height="30" Width="80"
+                        Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0"
+                        Cursor="Hand" Margin="0,0,10,0" Click="BtnClearAll_Click"/>
+
+                <Button Content="Cancel" FontSize="10" Height="30" Width="80"
+                        Background="#F0F0F3" Foreground="#3C3C3C" BorderThickness="0"
+                        Cursor="Hand" Margin="0,0,10,0" Click="BtnClose_Click"/>
+
+                <Button Content="Export / Execute" FontSize="10" FontWeight="Bold"
+                        Height="30" Width="130"
+                        Background="#E9AA00" Foreground="White" BorderThickness="0"
+                        Cursor="Hand" Click="BtnExport_Click"/>
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

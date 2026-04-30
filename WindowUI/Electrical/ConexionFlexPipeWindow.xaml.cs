@@ -562,7 +562,7 @@ namespace HMVTools
                 if (x0 != null && xN != null)
                 {
                     _dxfDeltaX = Math.Abs(xN.Value - x0.Value);
-                    _dxfDeltaY = Math.Abs(yN.Value - y0.Value);
+                    _dxfDeltaY = (yN.Value - y0.Value);
                 }
             }
             catch { /* silent — display will show N/A */ }
@@ -585,7 +585,7 @@ namespace HMVTools
                 double horizontalMm = Math.Sqrt(
                     Math.Pow((_pointB.X - _pointA.X) * ftToMm, 2) +
                     Math.Pow((_pointB.Y - _pointA.Y) * ftToMm, 2));
-                double verticalMm = Math.Abs(_pointB.Z - _pointA.Z) * ftToMm;
+                double verticalMm = (_pointB.Z - _pointA.Z) * ftToMm;
 
                 modelRow = $"MODEL: ΔX' = {horizontalMm:F1} mm   ΔY' = {verticalMm:F1} mm";
             }

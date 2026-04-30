@@ -42,6 +42,7 @@ namespace HMVTools
                 warning = $"Translation is {dist:F0} ft "
                         + $"(~{dist * 0.3048:F0} m). "
                         + "Shared coordinates may be misconfigured.";
+                return false;
             }
 
             return true;
