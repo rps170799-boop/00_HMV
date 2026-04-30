@@ -113,6 +113,13 @@
                 <StackPanel Grid.Row="5" Grid.Column="2" Margin="0,0,0,6">
                     <CheckBox x:Name="chkCopyViewports" Content="Copy viewports to sheets" IsChecked="True" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E" Margin="0,0,0,4"/>
                     <CheckBox x:Name="chkCopyTitleblocks" Content="Copy titleblocks" IsChecked="True" FontSize="11" FontWeight="SemiBold" Foreground="#1E1E1E"/>
+                    <Separator Margin="0,6,0,4" Background="#C8C8D2"/>
+                    <CheckBox x:Name="chkIncludeModelElements" Content="Copy Model Elements (use with caution)" IsChecked="False"
+                              FontSize="11" FontWeight="SemiBold" Foreground="#787882">
+                        <CheckBox.ToolTip>
+                            <ToolTip MaxWidth="280" Content="When checked, copies all elements visible in views including model geometry (walls, pipes, etc). Default behavior only transfers annotations and view-specific content."/>
+                        </CheckBox.ToolTip>
+                    </CheckBox>
                 </StackPanel>
 
                 <TextBlock Grid.Row="6" Grid.ColumnSpan="3" x:Name="statusText" FontSize="10" Foreground="#787882" Margin="0,6,0,0"/>

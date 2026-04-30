@@ -157,9 +157,18 @@
     <Compile Include="Helpers\ApsManager.cs" />
     <Compile Include="Helpers\Migrationdataclasses.cs" />
     <Compile Include="Helpers\PkceAuthenticator.cs" />
+    <Compile Include="Helpers\SheetHelpers.cs" />
+    <Compile Include="Helpers\SwallowErrorsHandler.cs" />
     <Compile Include="Helpers\Transfermanager.cs" />
+    <Compile Include="Helpers\TransferResult.cs" />
     <Compile Include="Helpers\TransferUnitsManager.cs" />
     <Compile Include="Helpers\TransferUnitsResult.cs" />
+    <Compile Include="Helpers\UseDestinationTypesHandler.cs" />
+    <Compile Include="Helpers\ViewContentCopier.cs" />
+    <Compile Include="Helpers\ViewFactory.cs" />
+    <Compile Include="Helpers\ViewportData.cs" />
+    <Compile Include="Helpers\ViewportPlacer.cs" />
+    <Compile Include="Helpers\ViewTransferHelper.cs" />
     <Compile Include="WindowUI\Annotation\Genericannotationtagwindow.xaml.cs">
       <DependentUpon>Genericannotationtagwindow.xaml</DependentUpon>
     </Compile>
@@ -244,6 +253,7 @@
     <None Include="HMV.addin" />
     <None Include="mkdocs.yml" />
     <None Include="packages.config" />
+    <None Include="REFACTORING.md" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="WindowUI\Annotation\Genericannotationtagwindow.xaml">

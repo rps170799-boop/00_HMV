@@ -275,8 +275,9 @@ namespace HMVTools
                 // Map the new checkboxes into the SheetOptions object
                 SheetOptions = new SheetCopyOptions
                 {
-                    CopyViewports = chkCopyViewports.IsChecked == true,
-                    CopyTitleblock = chkCopyTitleblocks.IsChecked == true
+                    CopyViewports        = chkCopyViewports.IsChecked == true,
+                    CopyTitleblock       = chkCopyTitleblocks.IsChecked == true,
+                    IncludeModelElements = chkIncludeModelElements.IsChecked == true
                 }
             };
 

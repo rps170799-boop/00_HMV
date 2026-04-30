@@ -55,6 +55,14 @@ namespace HMVTools
         public bool CopyGuideGrids { get; set; } = true;
         public bool PlaceholdersAsSheets { get; set; } = true;
         public bool PreserveDetailNumbers { get; set; } = true;
+
+        /// <summary>
+        /// When true, GetViewContents skips the ViewSpecific filter and
+        /// collects all visible elements (legacy behaviour). When false
+        /// (default), only view-owned annotations are collected for
+        /// spatial views, preventing accidental model-element copies.
+        /// </summary>
+        public bool IncludeModelElements { get; set; } = false;
     }
 
     /// <summary>User selections returned from the migration window.</summary>

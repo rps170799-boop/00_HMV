@@ -94,11 +94,11 @@ namespace HMVTools
             // ═══════════════════════════════════════════════════
 
             Transform coordTransform =
-                TransferManager.ComputeSharedCoordinateTransform(
+                SheetHelpers.ComputeSharedCoordinateTransform(
                     srcDoc, tgtDoc);
 
             string warning;
-            if (!TransferManager.ValidateTransform(
+            if (!SheetHelpers.ValidateTransform(
                     coordTransform, out warning)
                 && warning != null)
             {
@@ -153,19 +153,19 @@ namespace HMVTools
                     // ── 5c. Copy & assign view templates ───────
                     if (viewMap.Count > 0)
                     {
-                        TransferManager.CopyAndAssignViewTemplates(
+                        ViewTransferHelper.CopyAndAssignViewTemplates(
                             srcDoc, tgtDoc, viewMap, result);
                     }
                     // ── 5d. Copy view annotations (2nd pass) ───
                     if (viewMap.Count > 0 && settings.IncludeAnnotations)
                     {
-                        TransferManager.CopyViewAnnotations(
+                        ViewTransferHelper.CopyViewAnnotations(
                             srcDoc, tgtDoc, viewMap, result);
                     }
                     // ── 5e. Copy category graphic overrides ────
                     if (viewMap.Count > 0)
                     {
-                        TransferManager.CopyCategoryOverrides(
+                        ViewTransferHelper.CopyCategoryOverrides(
                             srcDoc, tgtDoc, viewMap, result);
                     }
 
@@ -198,7 +198,7 @@ namespace HMVTools
                                 kvp.Key) as View;
                             if (srcView == null) continue;
 
-                            var markers = TransferManager
+                            var markers = ViewTransferHelper
                                 .IdentifyReferenceMarkers(
                                     srcDoc, srcView);
 
