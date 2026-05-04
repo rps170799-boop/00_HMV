@@ -65,7 +65,16 @@ namespace HMVTools
 
         public void SetStatus(string message)
         {
-            Dispatcher.BeginInvoke(new Action(() => txtStatus.Text = message));
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                txtStatus.Text += message + Environment.NewLine;
+                txtStatus.ScrollToEnd();
+            }));
+        }
+
+        public void ClearLog()
+        {
+            Dispatcher.BeginInvoke(new Action(() => txtStatus.Text = string.Empty));
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -138,6 +147,7 @@ namespace HMVTools
             _exportHandler.Config   = _config;
             _exportHandler.UI       = this;
 
+            ClearLog();
             SetStatus("Executing — please wait...");
             _exportEvent.Raise();
         }

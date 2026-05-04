@@ -16,6 +16,12 @@ namespace HMVTools
         private ExternalEvent _flowExportEvent;
         private ElectricalFlowWindow _flowWindow;
 
+        private ElectricalRefresherPickHandler _refreshPickHandler;
+        private ExternalEvent                  _refreshPickEvent;
+        private ElectricalRefresherHandler     _refreshRunHandler;
+        private ExternalEvent                  _refreshRunEvent;
+        private ElectricalRefresherWindow      _refreshWindow;
+
         public ElectricalSuiteWindow(UIApplication uiapp)
         {
             InitializeComponent();
@@ -27,6 +33,11 @@ namespace HMVTools
             _flowPickEvent     = ExternalEvent.Create(_flowPickHandler);
             _flowExportHandler = new ElectricalFlowExportHandler();
             _flowExportEvent   = ExternalEvent.Create(_flowExportHandler);
+
+            _refreshPickHandler = new ElectricalRefresherPickHandler();
+            _refreshPickEvent   = ExternalEvent.Create(_refreshPickHandler);
+            _refreshRunHandler  = new ElectricalRefresherHandler();
+            _refreshRunEvent    = ExternalEvent.Create(_refreshRunHandler);
 
             this.Closed += (s, e) => ElectricalSuiteCommand.ClearWindow();
         }
@@ -86,7 +97,31 @@ namespace HMVTools
 
         private void BtnRefresh_Click(object sender, RoutedEventArgs e)
         {
-            SetStatus("Refresh Connections — coming soon.");
+            if (_refreshWindow != null && _refreshWindow.IsLoaded)
+            {
+                _refreshWindow.Focus();
+                return;
+            }
+
+            _refreshWindow = new ElectricalRefresherWindow(
+                _uiapp,
+                _refreshPickHandler, _refreshPickEvent,
+                _refreshRunHandler,  _refreshRunEvent);
+
+            var helper = new System.Windows.Interop.WindowInteropHelper(_refreshWindow);
+            helper.Owner = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+
+            _refreshWindow.Closed += (s, ev) =>
+            {
+                _refreshWindow = null;
+                this.Show();
+                this.Activate();
+                SetStatus("Refresh Connections closed.");
+            };
+
+            SetStatus("Opening Refresh Connections...");
+            this.Hide();
+            _refreshWindow.Show();
         }
 
         // ═══════════════════════════════════════════════════════════════════

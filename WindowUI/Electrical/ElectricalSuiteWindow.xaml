@@ -117,11 +117,11 @@
                     </StackPanel>
                 </Button>
 
-                <!-- 3 Refresh Connections (disabled) -->
+                <!-- 3 Refresh Connections -->
                 <Button x:Name="BtnRefresh" Click="BtnRefresh_Click"
-                        Height="60"
-                        Background="#FAFAFA" BorderBrush="#E0E0E0" BorderThickness="1"
-                        Cursor="Arrow" IsEnabled="False">
+                        Height="60" Margin="0,0,0,0"
+                        Background="#F5F8FC" BorderBrush="#C8C8D2" BorderThickness="1"
+                        Cursor="Hand">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border Background="{TemplateBinding Background}"
@@ -130,24 +130,24 @@
                                     CornerRadius="6">
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="#E6F0FA"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Background" Value="#CCE0F5"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Button.Template>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="6" Background="#C8C8D2" CornerRadius="3,0,0,3"
+                        <Border Width="6" Background="#C0392B" CornerRadius="3,0,0,3"
                                 Margin="0,8,0,8"/>
                         <StackPanel VerticalAlignment="Center" Margin="14,0,0,0">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="3 — Refresh Connections"
-                                           Foreground="#ABABAB" FontSize="12" FontWeight="SemiBold"/>
-                                <Border Background="#FFF8E1" BorderBrush="#E9AA00"
-                                        BorderThickness="1" CornerRadius="3"
-                                        Margin="10,0,0,0" Padding="5,1">
-                                    <TextBlock Text="coming soon"
-                                               Foreground="#E9AA00" FontSize="8"/>
-                                </Border>
-                            </StackPanel>
-                            <TextBlock Text="Rebuild electrical pipe connections"
-                                       Foreground="#C8C8D2" FontSize="9"/>
+                            <TextBlock Text="3 — Refresh Connections"
+                                       Foreground="#004982" FontSize="12" FontWeight="SemiBold"/>
+                            <TextBlock Text="Auto-connect adaptive points via DXF trajectory"
+                                       Foreground="#787882" FontSize="9"/>
                         </StackPanel>
                     </StackPanel>
                 </Button>

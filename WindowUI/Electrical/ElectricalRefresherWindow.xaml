@@ -1,0 +1,132 @@
+<Window x:Class="HMVTools.ElectricalRefresherWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="HMV Tools - Refresh Connections"
+        Width="500" Height="420"
+        WindowStyle="None"
+        AllowsTransparency="False"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="White"
+        FontFamily="Roboto, Arial, Segoe UI">
+
+    <Border Background="White" BorderBrush="#C8C8D2" BorderThickness="1" ClipToBounds="True">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="60"/>
+            </Grid.RowDefinitions>
+
+            <!-- ── Title Bar ── -->
+            <Grid Grid.Row="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop Color="#004982" Offset="0.0"/>
+                        <GradientStop Color="White"   Offset="2.5"/>
+                    </LinearGradientBrush>
+                </Grid.Background>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="40"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0,0,0">
+                    <TextBlock Text="HMV " Foreground="White"   FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text="Ingenieros" Foreground="#E9AA00" FontSize="12" FontWeight="Bold"/>
+                    <TextBlock Text=" — Refresh Connections" Foreground="White"
+                               FontSize="10" Margin="5,2,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="✕" FontSize="12" Foreground="White"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                        Click="BtnClose_Click"/>
+            </Grid>
+
+            <!-- ── Body ── -->
+            <Grid Grid.Row="1" Margin="20,14,20,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Selection row -->
+                <Grid Grid.Row="0" Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" BorderBrush="#C8C8D2" BorderThickness="1"
+                            CornerRadius="2" Padding="8,0" Height="28" Margin="0,0,8,0">
+                        <TextBlock x:Name="txtPointCount"
+                                   Text="No points selected"
+                                   FontSize="10" Foreground="#5A5A6A"
+                                   VerticalAlignment="Center"/>
+                    </Border>
+
+                    <Button Grid.Column="1" Content="⊕ Select" FontSize="10"
+                            Height="28" Padding="10,0" Margin="0,0,6,0"
+                            Background="#004982" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Click="BtnPick_Click"
+                            ToolTip="Pick adaptive points in the model"/>
+
+                    <Button Grid.Column="2" Content="✕ Clear" FontSize="10"
+                            Height="28" Padding="8,0" Margin="0,0,6,0"
+                            Background="#E8E8F0" Foreground="#3C3C3C" BorderThickness="0"
+                            Cursor="Hand" Click="BtnClearPoints_Click"/>
+
+                    <Button Grid.Column="3" Content="⚙ Config" FontSize="10"
+                            Height="28" Padding="8,0"
+                            Background="#5A7FA8" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Click="BtnConfig_Click"
+                            ToolTip="Open parameter configuration"/>
+                </Grid>
+
+                <!-- Scrollable log -->
+                <Border Grid.Row="1" BorderBrush="#C8C8D2" BorderThickness="1" CornerRadius="2">
+                    <TextBox x:Name="txtLog"
+                             Text="Ready. Select adaptive points and click Run."
+                             FontSize="9.5" Foreground="#3C3C3C"
+                             FontFamily="Consolas, Courier New"
+                             Margin="4" TextWrapping="Wrap"
+
+                             IsReadOnly="True"
+                             BorderThickness="0"
+                             Background="Transparent"
+                             VerticalScrollBarVisibility="Auto"
+                             AcceptsReturn="True"/>
+                </Border>
+
+                <!-- Status -->
+                <TextBlock x:Name="txtStatus" Grid.Row="2"
+                           Text="" FontSize="10" Foreground="#004982"
+                           FontWeight="SemiBold" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            </Grid>
+
+            <!-- ── Footer ── -->
+            <Border Grid.Row="2" Background="#F0F0F3" BorderBrush="#C8C8D2" BorderThickness="0,1,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                            VerticalAlignment="Center" Margin="0,0,16,0">
+
+                    <Button x:Name="btnReset" Content="⚠ Reset" FontSize="10"
+                            Height="32" Width="90" Margin="0,0,8,0"
+                            Background="#C0392B" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Click="BtnReset_Click"
+                            ToolTip="Delete FlexPipes and reset Connected flag on selected points"/>
+
+                    <Button Content="Cancel" FontSize="10" Height="32" Width="80"
+                            Background="#E8E8F0" Foreground="#3C3C3C" BorderThickness="0"
+                            Cursor="Hand" Margin="0,0,8,0" Click="BtnClose_Click"/>
+
+                    <Button x:Name="btnRun" Content="▶ Run" FontSize="10" FontWeight="Bold"
+                            Height="32" Width="90"
+                            Background="#E9AA00" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Click="BtnRun_Click"
+                            ToolTip="Create FlexPipes for all selected unconnected pairs"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

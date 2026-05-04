@@ -163,15 +163,29 @@ namespace HMVTools
                         GetParamStringValueWithTypeFallback(eq, Config.SourceEquipmentParam)))
                     .ToList();
 
-                UI?.SetStatus($"DBG Step 1b: {candidateEquipment.Count}/{allEquipment.Count} equipment have " +
-                    $"non-empty '{Config.SourceEquipmentParam}'.");
+                UI?.SetStatus($"DBG Step 1b: {candidateEquipment.Count}/{allEquipment.Count} candidates found.");
 
                 if (candidateEquipment.Count == 0)
                 {
-                    UI?.SetStatus($"DBG Error: No equipment has a value for param '{Config.SourceEquipmentParam}'. " +
-                        "Check the source parameter name in ⚙ Config.");
+                    UI?.SetStatus($"DBG Error: No equipment has '{Config.SourceEquipmentParam}'. Check ⚙ Config.");
                     return;
                 }
+
+                // ── 1c. Pre-cache bounding-box centers (avoid repeated get_BoundingBox) ──
+                var candidateCache = candidateEquipment
+                    .Select(eq => new EquipmentCache { Eq = eq, Center = GetEquipmentCenter(eq) })
+                    .Where(x => x.Center != null)
+                    .ToList();
+
+                UI?.SetStatus($"DBG Step 1c: {candidateCache.Count} candidates with valid locations.");
+
+                // Build a one-line candidate summary visible after the run
+                string candidateSummary = string.Join(" | ", candidateCache.Select(x =>
+                {
+                    string v = GetParamStringValueWithTypeFallback(x.Eq, Config.SourceEquipmentParam);
+                    string loc = $"({x.Center.X:F1},{x.Center.Y:F1},{x.Center.Z:F1})";
+                    return $"'{x.Eq.Name}'(id:{x.Eq.Id.IntegerValue} val:'{v}' ctr:{loc})";
+                }));
 
                 // ── 2. Transaction: write equipment param to each point ────────
                 using (Transaction trans = new Transaction(doc, "HMV - Electrical Flow Inject"))
@@ -193,10 +207,11 @@ namespace HMVTools
                         if (fi == null) { skipped++; continue; }
 
                         XYZ            pos = GetAdaptivePosition(doc, fi);
-                        FamilyInstance eq  = FindClosestEquipment(candidateEquipment, pos);
+                        FamilyInstance eq = FindClosestEquipment(candidateCache, pos);
 
                         if (eq == null) { skipped++; continue; }
 
+                       
                         string val = GetParamStringValueWithTypeFallback(eq, Config.SourceEquipmentParam);
 
                         Parameter dest = fi.LookupParameter(Config.DestPointParam);
@@ -220,16 +235,23 @@ namespace HMVTools
                             continue;
                         }
 
-                        dest.Set(val ?? string.Empty);
-                        lastDebug = $"DBG: Point '{fi.Name}' ← '{val}' (from eq '{eq.Name}')";
+                        // Inject as "PARAM_VALUE_ELEMENTID" using the actual Revit ElementId.
+                        // Example: source param = "TC", eq.Id = 2412545 → "TC_2412545"
+                        string valueToInject = string.IsNullOrWhiteSpace(val)
+                            ? eq.Id.IntegerValue.ToString()
+                            : val + "_" + eq.Id.IntegerValue;
+
+                        dest.Set(valueToInject);
+                        lastDebug = $"DBG: Point '{fi.Name}' (id {id.IntegerValue}) ← '{valueToInject}'" +
+                                    $" | src param='{Config.SourceEquipmentParam}'" +
+                                    $" | dst param='{Config.DestPointParam}'" +
+                                    $" | eq='{eq.Name}' (id {eq.Id.IntegerValue})";
                         updated++;
                     }
 
                     trans.Commit();
 
-                    string summary = $"✔ {updated} updated, {skipped} skipped, {noParam} param-errors.";
-                    if (noParam > 0 || skipped > 0)
-                        summary += " | Last: " + lastDebug;
+                    string summary = $"✔ {updated} updated, {skipped} skipped, {noParam} param-errors. | CANDIDATES: {candidateSummary} | Last: {lastDebug}";
                     UI?.SetStatus(summary);
                 }
             }
@@ -260,21 +282,107 @@ namespace HMVTools
         }
 
         private static FamilyInstance FindClosestEquipment(
-            List<FamilyInstance> candidates, XYZ position)
+        List<EquipmentCache> cachedCandidates, XYZ position)
         {
+            if (cachedCandidates.Count == 0) return null;
+
+            // ── Pass 1: cheap bbox-center distance → keep top 3 ──
+            const int shortlistSize = 3;
+
+            var ranked = cachedCandidates
+                .Select(c => new { c.Eq, c.Center, Dist = position.DistanceTo(c.Center) })
+                .OrderBy(x => x.Dist)
+                .Take(shortlistSize)
+                .ToList();
+
+            // If only one candidate survives, skip geometry entirely
+            if (ranked.Count == 1) return ranked[0].Eq;
+
+            // ── Pass 2: expensive face-distance only on shortlist ──
             FamilyInstance closest = null;
             double minDist = double.MaxValue;
 
-            foreach (FamilyInstance eq in candidates)
+            foreach (var r in ranked)
             {
-                XYZ loc = (eq.Location as LocationPoint)?.Point;
-                if (loc == null) continue;
+                double dist = GetMinDistanceToGeometry(r.Eq, position);
 
-                double dist = position.DistanceTo(loc);
-                if (dist < minDist) { minDist = dist; closest = eq; }
+                // Fallback to bbox center if no solid faces found
+                if (dist < 0) dist = r.Dist;
+
+                if (dist < minDist)
+                {
+                    minDist = dist;
+                    closest = r.Eq;
+                }
             }
 
             return closest;
+        }
+        public struct EquipmentCache
+        {
+            public FamilyInstance Eq;
+            public XYZ Center;
+        }
+        private static double GetMinDistanceToGeometry(FamilyInstance eq, XYZ position)
+        {
+            try
+            {
+                Options opts = new Options
+                {
+                    DetailLevel = ViewDetailLevel.Coarse,
+                    ComputeReferences = false
+                };
+
+                GeometryElement geomElem = eq.get_Geometry(opts);
+                if (geomElem == null) return -1;
+
+                double minDist = double.MaxValue;
+                WalkGeometry(geomElem, position, ref minDist);
+
+                return minDist < double.MaxValue ? minDist : -1;
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+
+        private static void WalkGeometry(GeometryElement geomElem, XYZ position, ref double minDist)
+        {
+            foreach (GeometryObject geomObj in geomElem)
+            {
+                Solid solid = geomObj as Solid;
+                if (solid != null && solid.Faces.Size > 0)
+                {
+                    foreach (Face face in solid.Faces)
+                    {
+                        IntersectionResult result = face.Project(position);
+                        if (result != null && result.Distance < minDist)
+                            minDist = result.Distance;
+                    }
+                    continue;
+                }
+
+                GeometryInstance gi = geomObj as GeometryInstance;
+                if (gi != null)
+                {
+                    GeometryElement nested = gi.GetInstanceGeometry();
+                    if (nested != null)
+                        WalkGeometry(nested, position, ref minDist);
+                }
+            }
+        }
+        private static XYZ GetEquipmentCenter(FamilyInstance eq)
+        {
+            try
+            {
+                BoundingBoxXYZ bb = eq.get_BoundingBox(null);
+                if (bb != null)
+                    return (bb.Min + bb.Max) * 0.5;
+            }
+            catch { }
+
+            return (eq.Location as LocationPoint)?.Point;
         }
 
         private static string GetParamStringValueWithTypeFallback(FamilyInstance fi, string paramName)
