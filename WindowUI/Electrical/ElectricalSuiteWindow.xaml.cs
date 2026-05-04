@@ -1,5 +1,7 @@
-﻿using Autodesk.Revit.UI;
+﻿using Autodesk.Revit.DB.Plumbing;
+using Autodesk.Revit.UI;
 using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Input;
 
@@ -22,6 +24,10 @@ namespace HMVTools
         private ExternalEvent                  _refreshRunEvent;
         private ElectricalRefresherWindow      _refreshWindow;
 
+        private ElectricalGeometryHandler _geomHandler;
+        private ExternalEvent             _geomEvent;
+        private ElectricalGeometryWindow  _geomWindow;
+
         public ElectricalSuiteWindow(UIApplication uiapp)
         {
             InitializeComponent();
@@ -38,6 +44,30 @@ namespace HMVTools
             _refreshPickEvent   = ExternalEvent.Create(_refreshPickHandler);
             _refreshRunHandler  = new ElectricalRefresherHandler();
             _refreshRunEvent    = ExternalEvent.Create(_refreshRunHandler);
+
+            // Geometry handler — must be created here in the valid Revit API context
+            var geomDoc = uiapp.ActiveUIDocument.Document;
+            var geomParamNames = new System.Collections.Generic.List<string>();
+            var geomSeen       = new System.Collections.Generic.HashSet<string>();
+            foreach (FlexPipe fp in new Autodesk.Revit.DB.FilteredElementCollector(geomDoc)
+                                        .OfClass(typeof(FlexPipe)).Cast<FlexPipe>())
+            {
+                foreach (Autodesk.Revit.DB.Parameter p in fp.Parameters)
+                {
+                    try { if (p.Definition != null && !string.IsNullOrWhiteSpace(p.Definition.Name)) geomSeen.Add(p.Definition.Name); } catch { }
+                }
+            }
+            geomParamNames.AddRange(geomSeen);
+            geomParamNames.Sort(System.StringComparer.OrdinalIgnoreCase);
+
+            _geomHandler = new ElectricalGeometryHandler(geomDoc);
+            _geomEvent   = ExternalEvent.Create(_geomHandler);
+            _geomWindow  = new ElectricalGeometryWindow(_geomHandler, _geomEvent, geomParamNames);
+            new System.Windows.Interop.WindowInteropHelper(_geomWindow)
+            {
+                Owner = uiapp.MainWindowHandle
+            };
+            _geomWindow.Closed += (s, ev) => { _geomWindow = null; };
 
             this.Closed += (s, e) => ElectricalSuiteCommand.ClearWindow();
         }
@@ -77,22 +107,36 @@ namespace HMVTools
 
         private void BtnGeom_Click(object sender, RoutedEventArgs e)
         {
-            try
+            if (_geomWindow != null && _geomWindow.IsLoaded)
             {
-                var win = new ElectricalGeometryWindow();
-                new System.Windows.Interop.WindowInteropHelper(win)
-                {
-                    Owner = new System.Windows.Interop.WindowInteropHelper(this).Handle
-                };
+                _geomWindow.Focus();
+                return;
+            }
 
-                SetStatus("Opening Export Information...");
-                win.ShowDialog();
-                SetStatus("Export Information closed.");
-            }
-            catch (Exception ex)
+            // Recreate window (reuse existing handler/event which were created in the constructor)
+            var doc        = _uiapp.ActiveUIDocument.Document;
+            var paramNames = new System.Collections.Generic.List<string>();
+            var seen       = new System.Collections.Generic.HashSet<string>();
+            foreach (FlexPipe fp in new Autodesk.Revit.DB.FilteredElementCollector(doc)
+                                        .OfClass(typeof(FlexPipe)).Cast<FlexPipe>())
             {
-                SetStatus("Error: " + ex.Message);
+                foreach (Autodesk.Revit.DB.Parameter p in fp.Parameters)
+                {
+                    try { if (p.Definition != null && !string.IsNullOrWhiteSpace(p.Definition.Name)) seen.Add(p.Definition.Name); } catch { }
+                }
             }
+            paramNames.AddRange(seen);
+            paramNames.Sort(System.StringComparer.OrdinalIgnoreCase);
+
+            _geomWindow = new ElectricalGeometryWindow(_geomHandler, _geomEvent, paramNames);
+            new System.Windows.Interop.WindowInteropHelper(_geomWindow)
+            {
+                Owner = new System.Windows.Interop.WindowInteropHelper(this).Handle
+            };
+            _geomWindow.Closed += (s, ev) => { _geomWindow = null; };
+
+            SetStatus("Opening Electrical Geometry...");
+            _geomWindow.Show();
         }
 
         private void BtnRefresh_Click(object sender, RoutedEventArgs e)

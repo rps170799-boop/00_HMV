@@ -414,12 +414,7 @@ namespace HMVTools
             }
         }
 
-        private static void SetStringParam(FamilyInstance fi, string paramName, string value)
-        {
-            if (fi == null || string.IsNullOrWhiteSpace(paramName)) return;
-            Parameter p = fi.LookupParameter(paramName);
-            if (p == null || p.IsReadOnly || p.StorageType != StorageType.String) return;
-            p.Set(value ?? string.Empty);
-        }
+        
+
     }
 }

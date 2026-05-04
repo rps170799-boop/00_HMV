@@ -18,18 +18,18 @@ namespace HMVTools
             cmbSourceEquipParam.ItemsSource = equipParams;
             cmbDestPointParam.ItemsSource   = pointParams;
 
-            if (current != null)
-            {
+            bool hasSource = current != null && !string.IsNullOrWhiteSpace(current.SourceEquipmentParam);
+            bool hasDest   = current != null && !string.IsNullOrWhiteSpace(current.DestPointParam);
+
+            if (hasSource)
                 SelectOrSet(cmbSourceEquipParam, current.SourceEquipmentParam);
-                SelectOrSet(cmbDestPointParam,   current.DestPointParam);
-            }
             else
-            {
-                // Try to select from the list; if the param isn't there yet, set as typed text.
-                // This ensures the defaults are always visible even in an empty model.
                 TrySelectDefault(cmbSourceEquipParam, "HMV_CARGAS DE DISEÑO_EQUIPO");
-                TrySelectDefault(cmbDestPointParam,   "HMV_CFI_EQUIPO INICIAL");
-            }
+
+            if (hasDest)
+                SelectOrSet(cmbDestPointParam, current.DestPointParam);
+            else
+                TrySelectDefault(cmbDestPointParam, "HMV_CFI_EQUIPO INICIAL");
         }
 
         private void BtnSave_Click(object sender, RoutedEventArgs e)
