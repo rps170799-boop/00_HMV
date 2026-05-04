@@ -285,142 +285,141 @@ namespace HMVTools
                 var pts = group.ToList();
                 string cnx = group.Key;
 
-                if (pts.Count != 2)
+                if (pts.Count < 2)
                 {
-                    UI?.Log($"  [{cnx}] Skipped: expected 2 points, found {pts.Count}.");
+                    UI?.Log($"  [{cnx}] Skipped: only {pts.Count} point(s) found.");
                     skipped++;
                     continue;
                 }
 
-                // Self-connection guard — extract the ElementId suffix after the last '_'
-                // e.g. "TC_2412545" → "2412545". Same suffix = same physical equipment → skip.
-                string idA = ExtractEquipmentId(pts[0].equipoId);
-                string idB = ExtractEquipmentId(pts[1].equipoId);
+                // Find optimal pairs — filters same-equipment pairs, minimises distance
+                var pairIndices = FindOptimalPairIndices(pts);
 
-                UI?.Log($"  [{cnx}] Guard check: A_id='{idA}' B_id='{idB}'" +
-                        $" | A_full='{pts[0].equipoId}' B_full='{pts[1].equipoId}'");
-
-                if (!string.IsNullOrWhiteSpace(idA) && idA.Equals(idB, StringComparison.OrdinalIgnoreCase))
+                if (pairIndices.Count == 0)
                 {
-                    UI?.Log($"  [{cnx}] Skipped: both points share equipment id '{idA}'.");
+                    UI?.Log($"  [{cnx}] Skipped: {pts.Count} point(s) but no valid pairs (all share the same equipment).");
                     skipped++;
                     continue;
                 }
 
-                // ── Find DXF file ─────────────────────────────────────────────
+                if (pts.Count > 2)
+                    UI?.Log($"  [{cnx}] {pts.Count} points → {pairIndices.Count} pair(s) to connect.");
+
+                // ── Find DXF file (shared by all pairs in this group) ──────────
                 if (!dxfMap.TryGetValue(cnx, out string dxfPath))
                 {
                     UI?.Log($"  [{cnx}] Warning: no DXF file found for key '{cnx}'. Skipped.");
-                    skipped++;
+                    skipped += pairIndices.Count;
                     continue;
                 }
 
+                // Pre-parse DXF once — reused for every pair in this group
+                double groupDxfDx = 0;
+                double groupDxfDy = 0;
+                List<XYZ> groupRawPoints = null;
+
                 try
                 {
-                    // ── Determine orientation: which point is Inicial / Final ─────
-                    // Uses signed DXF vector vs signed Revit vector (XY plane).
-                    // Step 1 — read signed DXF vector (no Math.Abs)
-                    ExtractDxfVectorSigned(dxfPath, out double dxfDx, out double dxfDy);
-
-                    // Step 2 — candidate: P1 = pts[0], P2 = pts[1]
-                    XYZ posP1 = pts[0].pos;
-                    XYZ posP2 = pts[1].pos;
-
-                    // Convert Revit feet to mm for comparison with DXF mm
-                    double ftToMm = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
-                    double rvtDx = (posP2.X - posP1.X) * ftToMm;
-                    double rvtDy = (posP2.Y - posP1.Y) * ftToMm;
-
-                    double rvtVano     = Math.Sqrt(rvtDx * rvtDx + rvtDy * rvtDy);
-                    double rvtDesnivel = Math.Abs((posP2.Z - posP1.Z) * ftToMm);
-
-                    UI?.Log($"  [{cnx}] RVT → vano: {rvtVano:F1} mm  |  desnivel: {rvtDesnivel:F1} mm");
-                    UI?.Log($"  [{cnx}] DXF → dx: {dxfDx:F1} mm  dy: {dxfDy:F1} mm  " +
-                            $"(vano≈{Math.Abs(dxfDx):F1}  desnivel≈{Math.Abs(dxfDy):F1})");
-
-                    // Step 3 — align signs: if dot product < 0 swap the pair so
-                    // the Revit vector points in the same general direction as DXF.
-                    // Primary axis: vano (X). If vano ambiguous (≈0), use desnivel (Y).
-                    bool swapPoints = DetermineSwap(dxfDx, dxfDy, rvtDx, rvtDy);
-
-                    var ptInicial = swapPoints ? pts[1] : pts[0];
-                    var ptFinal   = swapPoints ? pts[0] : pts[1];
-
-                    XYZ pointA = ptInicial.pos;  // Inicial → start of FlexPipe
-                    XYZ pointB = ptFinal.pos;    // Final   → end   of FlexPipe
-
-                    // ── Parse full DXF trajectory (same as ElectricalConnectionCommand) ──
-                    List<XYZ> rawPoints = ParseDxfPoints(dxfPath);
-                    if (rawPoints == null || rawPoints.Count < 2)
-                    {
-                        UI?.Log($"  [{cnx}] Error: DXF has insufficient points.");
-                        skipped++;
-                        continue;
-                    }
-
-                    List<XYZ> trajectory = CalculateTrajectory(rawPoints, pointA, pointB);
-                    trajectory = ResampleTrajectory(trajectory, 0.5);
-
-                    double minClearance = 0.5;
-                    while (trajectory.Count > 0 && trajectory.First().DistanceTo(pointA) <= minClearance)
-                        trajectory.RemoveAt(0);
-                    while (trajectory.Count > 0 && trajectory.Last().DistanceTo(pointB) <= minClearance)
-                        trajectory.RemoveAt(trajectory.Count - 1);
-
-                    trajectory.Insert(0, pointA);
-                    trajectory.Add(pointB);
-
-                    XYZ startTangent = (trajectory[1] - trajectory[0]).Normalize();
-                    XYZ endTangent   = (trajectory[trajectory.Count - 1] - trajectory[trajectory.Count - 2]).Normalize();
-
-                    // ── Create FlexPipe + inject parameters ───────────────────
-                    using (Transaction trans = new Transaction(doc, "HMV - Create FlexPipe " + cnx))
-                    {
-                        trans.Start();
-
-                        FailureHandlingOptions fho = trans.GetFailureHandlingOptions();
-                        fho.SetFailuresPreprocessor(new WarningSuppressor());
-                        trans.SetFailureHandlingOptions(fho);
-
-                        FlexPipe flexPipe = FlexPipe.Create(
-                            doc,
-                            systemTypeId,
-                            flexType.Id,
-                            defaultLevel.Id,
-                            startTangent,
-                            endTangent,
-                            trajectory);
-
-                        if (flexPipe == null)
-                        {
-                            trans.RollBack();
-                            UI?.Log($"  [{cnx}] Error: FlexPipe.Create returned null.");
-                            skipped++;
-                            continue;
-                        }
-
-                        // Inject FlexPipe parameters
-                        // Strip the "_ElementId" suffix for display — FlexPipe shows only the equipment name.
-                        // "TC_2412545" → "TC"
-                        TrySetStringParam(flexPipe, Config.FlexCnxNumberParam,    cnx);
-                        TrySetStringParam(flexPipe, Config.FlexEquipoInicialParam, StripEquipmentId(ptInicial.equipoId));
-                        TrySetStringParam(flexPipe, Config.FlexEquipoFinalParam,   StripEquipmentId(ptFinal.equipoId));
-
-                        // Mark adaptive points as connected
-                        SetConnectedFlag(ptInicial.fi, Config.ConnectedParam);
-                        SetConnectedFlag(ptFinal.fi,   Config.ConnectedParam);
-
-                        trans.Commit();
-                    }
-
-                    UI?.Log($"  [{cnx}] ✔ Created — Inicial: {ptInicial.equipoId} → Final: {ptFinal.equipoId}" +
-                            (swapPoints ? " (swapped)" : ""));
-                    created++;
+                    ExtractDxfVectorSigned(dxfPath, out groupDxfDx, out groupDxfDy);
+                    groupRawPoints = ParseDxfPoints(dxfPath);
                 }
                 catch (Exception ex)
                 {
-                    UI?.Log($"  [{cnx}] Exception: {ex.Message}");
-                    skipped++;
+                    UI?.Log($"  [{cnx}] DXF read error: {ex.Message}. Skipped.");
+                    skipped += pairIndices.Count;
+                    continue;
+                }
+
+                if (groupRawPoints == null || groupRawPoints.Count < 2)
+                {
+                    UI?.Log($"  [{cnx}] Error: DXF has insufficient points.");
+                    skipped += pairIndices.Count;
+                    continue;
+                }
+
+                foreach (var pair in pairIndices)
+                {
+                    var ptA = pts[pair.iA];
+                    var ptB = pts[pair.iB];
+
+                    try
+                    {
+                        double ftToMm      = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
+                        double rvtDx       = (ptB.pos.X - ptA.pos.X) * ftToMm;
+                        double rvtDy       = (ptB.pos.Y - ptA.pos.Y) * ftToMm;
+                        double rvtVano     = Math.Sqrt(rvtDx * rvtDx + rvtDy * rvtDy);
+                        double rvtDesnivel = Math.Abs((ptB.pos.Z - ptA.pos.Z) * ftToMm);
+
+                        UI?.Log($"  [{cnx}] RVT → vano: {rvtVano:F1} mm  |  desnivel: {rvtDesnivel:F1} mm");
+                        UI?.Log($"  [{cnx}] DXF → dx: {groupDxfDx:F1} mm  dy: {groupDxfDy:F1} mm");
+
+                        bool swapPoints = DetermineSwap(groupDxfDx, groupDxfDy, rvtDx, rvtDy);
+
+                        var ptInicial = swapPoints ? ptB : ptA;
+                        var ptFinal   = swapPoints ? ptA : ptB;
+
+                        XYZ pointA = ptInicial.pos;
+                        XYZ pointB = ptFinal.pos;
+
+                        List<XYZ> trajectory = CalculateTrajectory(groupRawPoints, pointA, pointB);
+                        trajectory = ResampleTrajectory(trajectory, 0.5);
+
+                        double minClearance = 0.5;
+                        while (trajectory.Count > 0 && trajectory.First().DistanceTo(pointA) <= minClearance)
+                            trajectory.RemoveAt(0);
+                        while (trajectory.Count > 0 && trajectory.Last().DistanceTo(pointB) <= minClearance)
+                            trajectory.RemoveAt(trajectory.Count - 1);
+
+                        trajectory.Insert(0, pointA);
+                        trajectory.Add(pointB);
+
+                        XYZ startTangent = (trajectory[1] - trajectory[0]).Normalize();
+                        XYZ endTangent   = (trajectory[trajectory.Count - 1] - trajectory[trajectory.Count - 2]).Normalize();
+
+                        using (Transaction trans = new Transaction(doc, "HMV - Create FlexPipe " + cnx))
+                        {
+                            trans.Start();
+
+                            FailureHandlingOptions fho = trans.GetFailureHandlingOptions();
+                            fho.SetFailuresPreprocessor(new WarningSuppressor());
+                            trans.SetFailureHandlingOptions(fho);
+
+                            FlexPipe flexPipe = FlexPipe.Create(
+                                doc,
+                                systemTypeId,
+                                flexType.Id,
+                                defaultLevel.Id,
+                                startTangent,
+                                endTangent,
+                                trajectory);
+
+                            if (flexPipe == null)
+                            {
+                                trans.RollBack();
+                                UI?.Log($"  [{cnx}] Error: FlexPipe.Create returned null.");
+                                skipped++;
+                                continue;
+                            }
+
+                            TrySetStringParam(flexPipe, Config.FlexCnxNumberParam,    cnx);
+                            TrySetStringParam(flexPipe, Config.FlexEquipoInicialParam, StripEquipmentId(ptInicial.equipoId));
+                            TrySetStringParam(flexPipe, Config.FlexEquipoFinalParam,   StripEquipmentId(ptFinal.equipoId));
+
+                            SetConnectedFlag(ptInicial.fi, Config.ConnectedParam);
+                            SetConnectedFlag(ptFinal.fi,   Config.ConnectedParam);
+
+                            trans.Commit();
+                        }
+
+                        UI?.Log($"  [{cnx}] ✔ Created — Inicial: {ptInicial.equipoId} → Final: {ptFinal.equipoId}" +
+                                (swapPoints ? " (swapped)" : ""));
+                        created++;
+                    }
+                    catch (Exception ex)
+                    {
+                        UI?.Log($"  [{cnx}] Exception: {ex.Message}");
+                        skipped++;
+                    }
                 }
             }
 
@@ -669,6 +668,43 @@ namespace HMVTools
         // ═══════════════════════════════════════════════════════════════════
         //  SMALL UTILITIES
         // ═══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Returns greedy minimum-distance index pairs from a list of candidate points.
+        /// Pairs where both points share the same equipment ID are excluded.
+        /// </summary>
+        private static List<(int iA, int iB)> FindOptimalPairIndices(
+            List<(ElementId id, FamilyInstance fi, string cnx, string equipoId, XYZ pos)> pts)
+        {
+            var result = new List<(int, int)>();
+            var used   = new HashSet<int>();
+
+            var candidates = new List<(int iA, int iB, double dist)>();
+            for (int i = 0; i < pts.Count; i++)
+            {
+                for (int j = i + 1; j < pts.Count; j++)
+                {
+                    string idA = ExtractEquipmentId(pts[i].equipoId);
+                    string idB = ExtractEquipmentId(pts[j].equipoId);
+                    if (!string.IsNullOrWhiteSpace(idA) &&
+                        idA.Equals(idB, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    candidates.Add((i, j, pts[i].pos.DistanceTo(pts[j].pos)));
+                }
+            }
+
+            candidates.Sort((a, b) => a.dist.CompareTo(b.dist));
+
+            foreach (var c in candidates)
+            {
+                if (used.Contains(c.iA) || used.Contains(c.iB)) continue;
+                result.Add((c.iA, c.iB));
+                used.Add(c.iA);
+                used.Add(c.iB);
+            }
+
+            return result;
+        }
 
         /// <summary>
         /// Extracts the equipment ElementId portion from a value formatted as "EQUIPO_ID".
