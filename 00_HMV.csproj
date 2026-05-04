@@ -140,6 +140,7 @@
     <Compile Include="Commands\Electrical\ElectricalConnectionCommand.cs" />
     <Compile Include="Commands\Electrical\ElectricalFlowCommand.cs" />
     <Compile Include="Commands\Electrical\ElectricalGeometryCommand.cs" />
+    <Compile Include="Commands\Electrical\ElectricalSuiteCommand.cs" />
     <Compile Include="Commands\Electrical\ReshapeFlexPipeCommand.cs" />
     <Compile Include="Commands\FamilyControl\ConstraintsReleaseCommand.cs" />
     <Compile Include="Commands\Transfer\Migrateelementscommand.cs" />
@@ -208,6 +209,9 @@
     </Compile>
     <Compile Include="WindowUI\Electrical\ElectricalFlowWindow.xaml.cs">
       <DependentUpon>ElectricalFlowWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="WindowUI\Electrical\ElectricalSuiteWindow.xaml.cs">
+      <DependentUpon>ElectricalSuiteWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="WindowUI\Electrical\ElectricalGeometryWindow.xaml.cs">
       <DependentUpon>ElectricalGeometryWindow.xaml</DependentUpon>
@@ -311,6 +315,10 @@
     </Page>
     <Page Include="WindowUI\Electrical\ElectricalFlowWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="WindowUI\Electrical\ElectricalSuiteWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
     </Page>
     <Page Include="WindowUI\Electrical\ElectricalGeometryWindow.xaml">
       <Generator>MSBuild:Compile</Generator>

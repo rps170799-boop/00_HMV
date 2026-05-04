@@ -4,130 +4,22 @@ using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Globalization;
-using System.IO;
 using System.Linq;
 
 namespace HMVTools
 {
-    // ═══════════════════════════════════════════════════════════════════
-    //  ENUMS
-    // ═══════════════════════════════════════════════════════════════════
-
-    public enum SortXDirection { None, Right, Left }
-    public enum SortYDirection { None, Up, Down }
-
-    // ═══════════════════════════════════════════════════════════════════
-    //  DATA MODEL  —  one row in the main window list
-    // ═══════════════════════════════════════════════════════════════════
-
-    public class ElectricalFlowPointGroup : INotifyPropertyChanged
-    {
-        private SortXDirection _sortX = SortXDirection.None;
-        private SortYDirection _sortY = SortYDirection.None;
-        private bool _linkedToNext;
-
-        public int GroupIndex { get; set; }
-        public List<ElementId> PointIds { get; set; } = new List<ElementId>();
-
-        // ── X axis (Right / Left are mutually exclusive) ─────────────────────
-        public SortXDirection SortX
-        {
-            get => _sortX;
-            set
-            {
-                if (_sortX == value) return;
-                _sortX = value;
-                OnPropertyChanged(nameof(SortX));
-                OnPropertyChanged(nameof(SortRight));
-                OnPropertyChanged(nameof(SortLeft));
-            }
-        }
-
-        public bool SortRight
-        {
-            get => SortX == SortXDirection.Right;
-            set
-            {
-                if (value) SortX = SortXDirection.Right;
-                else if (SortX == SortXDirection.Right) SortX = SortXDirection.None;
-            }
-        }
-
-        public bool SortLeft
-        {
-            get => SortX == SortXDirection.Left;
-            set
-            {
-                if (value) SortX = SortXDirection.Left;
-                else if (SortX == SortXDirection.Left) SortX = SortXDirection.None;
-            }
-        }
-
-        // ── Y axis (Up / Down are mutually exclusive) ─────────────────────────
-        public SortYDirection SortY
-        {
-            get => _sortY;
-            set
-            {
-                if (_sortY == value) return;
-                _sortY = value;
-                OnPropertyChanged(nameof(SortY));
-                OnPropertyChanged(nameof(SortUp));
-                OnPropertyChanged(nameof(SortDown));
-            }
-        }
-
-        public bool SortUp
-        {
-            get => SortY == SortYDirection.Up;
-            set
-            {
-                if (value) SortY = SortYDirection.Up;
-                else if (SortY == SortYDirection.Up) SortY = SortYDirection.None;
-            }
-        }
-
-        public bool SortDown
-        {
-            get => SortY == SortYDirection.Down;
-            set
-            {
-                if (value) SortY = SortYDirection.Down;
-                else if (SortY == SortYDirection.Down) SortY = SortYDirection.None;
-            }
-        }
-
-        // ── Padlock: last point of this group links to first of next ──────────
-        public bool LinkedToNext
-        {
-            get => _linkedToNext;
-            set { _linkedToNext = value; OnPropertyChanged(nameof(LinkedToNext)); }
-        }
-
-        public string DisplayLabel => $"Group {GroupIndex + 1}   —   {PointIds.Count} pts";
-
-        public event PropertyChangedEventHandler PropertyChanged;
-        internal void OnPropertyChanged(string name) =>
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-    }
-
     // ═══════════════════════════════════════════════════════════════════
     //  CONFIGURATION — set by the Config window, consumed by the handler
     // ═══════════════════════════════════════════════════════════════════
 
     public class ElectricalFlowConfig
     {
-        public string SourceEquipmentParam   { get; set; }
-        public string DestEquipmentNameParam { get; set; }
-        public string DestCNParam            { get; set; }
-        public bool   UpdateEquipmentNames   { get; set; } = true;
-        public bool   UpdateCN               { get; set; } = true;
+        public string SourceEquipmentParam { get; set; }
+        public string DestPointParam       { get; set; }
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  COMMAND  (non-modal pattern — identical to ElectricalConnectionCommand)
+    //  COMMAND
     // ═══════════════════════════════════════════════════════════════════
 
     [Transaction(TransactionMode.Manual)]
@@ -169,7 +61,7 @@ namespace HMVTools
 
     // ═══════════════════════════════════════════════════════════════════
     //  PICK HANDLER  — hides the window, picks adaptive components,
-    //                  returns control to the UI via OnGroupPicked()
+    //                  returns ids to the UI via OnPointsPicked()
     // ═══════════════════════════════════════════════════════════════════
 
     public class ElectricalFlowPickHandler : IExternalEventHandler
@@ -187,7 +79,7 @@ namespace HMVTools
                 IList<Reference> refs = uidoc.Selection.PickObjects(
                     ObjectType.Element,
                     new AdaptiveComponentFilter(),
-                    "Select Adaptive Components for this group — click Finish when done");
+                    "Select Adaptive Components — click Finish when done");
 
                 if (refs == null || refs.Count == 0)
                 {
@@ -196,8 +88,7 @@ namespace HMVTools
                     return;
                 }
 
-                var ids = refs.Select(r => r.ElementId).ToList();
-                UI?.OnGroupPicked(ids);
+                UI?.OnPointsPicked(refs.Select(r => r.ElementId).ToList());
             }
             catch (Autodesk.Revit.Exceptions.OperationCanceledException)
             {
@@ -213,17 +104,17 @@ namespace HMVTools
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  EXPORT HANDLER  — sorting, parameter update, CSV generation
+    //  EXPORT HANDLER  — finds closest equipment per point, injects param
     // ═══════════════════════════════════════════════════════════════════
 
     public class ElectricalFlowExportHandler : IExternalEventHandler
     {
-        // Set by the window before raising the event
-        public ElectricalFlowWindow              UI     { get; set; }
-        public List<ElectricalFlowPointGroup>    Groups { get; set; }
-        public ElectricalFlowConfig              Config { get; set; }
+        public ElectricalFlowWindow  UI       { get; set; }
+        public List<ElementId>       PointIds { get; set; }
+        public ElectricalFlowConfig  Config   { get; set; }
 
-        private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+        private static readonly System.Globalization.CultureInfo Inv =
+            System.Globalization.CultureInfo.InvariantCulture;
 
         public string GetName() => "ElectricalFlowExportHandler";
 
@@ -231,91 +122,59 @@ namespace HMVTools
         {
             Document doc = app.ActiveUIDocument.Document;
 
-            if (Groups == null || Groups.Count == 0 || Config == null)
+            if (PointIds == null || PointIds.Count == 0 || Config == null)
             {
-                UI?.SetStatus("Error: No groups or configuration data available.");
+                UI?.SetStatus("DBG Error: No points or config. PointIds=" +
+                    (PointIds == null ? "null" : PointIds.Count.ToString()) +
+                    " Config=" + (Config == null ? "null" : "ok"));
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(Config.SourceEquipmentParam) ||
+                string.IsNullOrWhiteSpace(Config.DestPointParam))
+            {
+                UI?.SetStatus("DBG Error: Params not configured. Source='" +
+                    Config.SourceEquipmentParam + "' Dest='" + Config.DestPointParam + "'");
                 return;
             }
 
             try
             {
-                UI?.SetStatus("Processing...");
+                UI?.SetStatus($"DBG Step 1: Collecting Electrical Equipment... ({PointIds.Count} points to process)");
 
-                // ── 1. Collect all Electrical Equipment in the model once ─────
+                // ── 1. Collect all Electrical Equipment once ──────────────────
                 var allEquipment = new FilteredElementCollector(doc)
                     .OfCategory(BuiltInCategory.OST_ElectricalEquipment)
                     .OfClass(typeof(FamilyInstance))
                     .Cast<FamilyInstance>()
                     .ToList();
 
-                // Conversion factor: internal Revit feet → millimeters (matches ElectricalGeometryCommand)
-                double ftToMm = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
+                UI?.SetStatus($"DBG Step 1: Found {allEquipment.Count} equipment total.");
 
-                // ── 2. Sort each group and store as flat list per group ────────
-                var sortedGroups = new List<List<(ElementId Id, XYZ Pos)>>();
-
-                foreach (ElectricalFlowPointGroup group in Groups)
+                if (allEquipment.Count == 0)
                 {
-                    var pts = new List<(ElementId Id, XYZ Pos)>();
-
-                    foreach (ElementId id in group.PointIds)
-                    {
-                        FamilyInstance fi = doc.GetElement(id) as FamilyInstance;
-                        if (fi == null) continue;
-                        XYZ pos = GetAdaptivePosition(doc, fi);
-                        pts.Add((id, pos));
-                    }
-
-                    sortedGroups.Add(ApplySort(pts, group.SortX, group.SortY));
-                }
-
-                // ── 3. Build connection pairs (global CN counter) ─────────────
-                //
-                //  Padlock OFF: group pairs are independent  → 1-2-3  then  4-5-6
-                //  Padlock ON:  last of current links to first of next → 1-2-3-4-5-6
-                //
-                var connections = new List<(int CN, ElementId Id1, XYZ Pos1, ElementId Id2, XYZ Pos2)>();
-                int cn = 1;
-
-                for (int g = 0; g < sortedGroups.Count; g++)
-                {
-                    List<(ElementId Id, XYZ Pos)> pts = sortedGroups[g];
-
-                    // Within-group consecutive pairs
-                    for (int i = 0; i < pts.Count - 1; i++)
-                    {
-                        connections.Add((cn++,
-                            pts[i].Id,     pts[i].Pos,
-                            pts[i + 1].Id, pts[i + 1].Pos));
-                    }
-
-                    // Cross-group connection if padlock is ON and a next group exists
-                    if (Groups[g].LinkedToNext
-                        && g + 1 < sortedGroups.Count
-                        && pts.Count > 0
-                        && sortedGroups[g + 1].Count > 0)
-                    {
-                        var next = sortedGroups[g + 1];
-                        connections.Add((cn++,
-                            pts[pts.Count - 1].Id, pts[pts.Count - 1].Pos,
-                            next[0].Id,            next[0].Pos));
-                    }
-                }
-
-                if (connections.Count == 0)
-                {
-                    UI?.SetStatus("Error: No connections generated. Each group needs at least 2 points.");
+                    UI?.SetStatus("DBG Error: No Electrical Equipment found in the model.");
                     return;
                 }
 
-                // ── 4. Transaction: write parameters back to adaptive points ──
-                //
-                // Each CONNECTION is between TWO points (pt1 → pt2).
-                // Both endpoints receive the same CN so the connection is
-                // fully identified from either end.
-                // Equipment names are written per-point: each point gets the
-                // name of the equipment closest to it.
-                using (Transaction trans = new Transaction(doc, "HMV - Electrical Flow Update"))
+                // ── 1b. Filter to only equipment that have a non-empty source param ──
+                var candidateEquipment = allEquipment
+                    .Where(eq => !string.IsNullOrEmpty(
+                        GetParamStringValueWithTypeFallback(eq, Config.SourceEquipmentParam)))
+                    .ToList();
+
+                UI?.SetStatus($"DBG Step 1b: {candidateEquipment.Count}/{allEquipment.Count} equipment have " +
+                    $"non-empty '{Config.SourceEquipmentParam}'.");
+
+                if (candidateEquipment.Count == 0)
+                {
+                    UI?.SetStatus($"DBG Error: No equipment has a value for param '{Config.SourceEquipmentParam}'. " +
+                        "Check the source parameter name in ⚙ Config.");
+                    return;
+                }
+
+                // ── 2. Transaction: write equipment param to each point ────────
+                using (Transaction trans = new Transaction(doc, "HMV - Electrical Flow Inject"))
                 {
                     trans.Start();
 
@@ -323,106 +182,65 @@ namespace HMVTools
                     fho.SetFailuresPreprocessor(new WarningSuppressor());
                     trans.SetFailureHandlingOptions(fho);
 
-                    foreach (var conn in connections)
+                    int updated   = 0;
+                    int skipped   = 0;
+                    int noParam   = 0;
+                    string lastDebug = string.Empty;
+
+                    foreach (ElementId id in PointIds)
                     {
-                        FamilyInstance pt1 = doc.GetElement(conn.Id1) as FamilyInstance;
-                        FamilyInstance pt2 = doc.GetElement(conn.Id2) as FamilyInstance;
+                        FamilyInstance fi = doc.GetElement(id) as FamilyInstance;
+                        if (fi == null) { skipped++; continue; }
 
-                        if (Config.UpdateEquipmentNames)
+                        XYZ            pos = GetAdaptivePosition(doc, fi);
+                        FamilyInstance eq  = FindClosestEquipment(candidateEquipment, pos);
+
+                        if (eq == null) { skipped++; continue; }
+
+                        string val = GetParamStringValueWithTypeFallback(eq, Config.SourceEquipmentParam);
+
+                        Parameter dest = fi.LookupParameter(Config.DestPointParam);
+                        if (dest == null)
                         {
-                            FamilyInstance eq1 = FindClosestEquipment(allEquipment, conn.Pos1);
-                            FamilyInstance eq2 = FindClosestEquipment(allEquipment, conn.Pos2);
-
-                            // Read the source value from the equipment — checks instance
-                            // param first, then the family type (symbol) param explicitly.
-                            string name1 = GetParamStringValueWithTypeFallback(eq1, Config.SourceEquipmentParam);
-                            string name2 = GetParamStringValueWithTypeFallback(eq2, Config.SourceEquipmentParam);
-
-                            // Write the equipment name to each endpoint of the connection
-                            SetStringParam(pt1, Config.DestEquipmentNameParam, name1);
-                            SetStringParam(pt2, Config.DestEquipmentNameParam, name2);
+                            noParam++;
+                            lastDebug = $"DBG: Point '{fi.Name}' (id {id.IntegerValue}) — " +
+                                $"dest param '{Config.DestPointParam}' NOT FOUND.";
+                            continue;
+                        }
+                        if (dest.IsReadOnly)
+                        {
+                            noParam++;
+                            lastDebug = $"DBG: Point '{fi.Name}' — dest param is READ-ONLY.";
+                            continue;
+                        }
+                        if (dest.StorageType != StorageType.String)
+                        {
+                            noParam++;
+                            lastDebug = $"DBG: Point '{fi.Name}' — dest param StorageType={dest.StorageType} (not String).";
+                            continue;
                         }
 
-                        if (Config.UpdateCN)
-                        {
-                            // CN is written to BOTH endpoints so the connection is
-                            // identifiable from either adaptive point.
-                            string cnStr = conn.CN.ToString(Inv);
-                            SetIntOrStringParam(pt1, Config.DestCNParam, cnStr);
-                            SetIntOrStringParam(pt2, Config.DestCNParam, cnStr);
-                        }
+                        dest.Set(val ?? string.Empty);
+                        lastDebug = $"DBG: Point '{fi.Name}' ← '{val}' (from eq '{eq.Name}')";
+                        updated++;
                     }
 
                     trans.Commit();
+
+                    string summary = $"✔ {updated} updated, {skipped} skipped, {noParam} param-errors.";
+                    if (noParam > 0 || skipped > 0)
+                        summary += " | Last: " + lastDebug;
+                    UI?.SetStatus(summary);
                 }
-
-                // ── 5. Build CSV lines ────────────────────────────────────────
-                var lines = new List<string>
-                {
-                    "CN;Equipment 1;Equipment 2;Vano (mm);Desnivel (mm)"
-                };
-
-                foreach (var conn in connections)
-                {
-                    FamilyInstance eq1 = FindClosestEquipment(allEquipment, conn.Pos1);
-                    FamilyInstance eq2 = FindClosestEquipment(allEquipment, conn.Pos2);
-
-                    string name1 = GetParamStringValueWithTypeFallback(eq1, Config.SourceEquipmentParam);
-                    string name2 = GetParamStringValueWithTypeFallback(eq2, Config.SourceEquipmentParam);
-
-                    // Horizontal distance (vano) and vertical delta (desnivel) in mm
-                    // Same formula as ElectricalGeometryCommand: sqrt(dx²+dy²) and abs(dz)
-                    double dx = (conn.Pos2.X - conn.Pos1.X) * ftToMm;
-                    double dy = (conn.Pos2.Y - conn.Pos1.Y) * ftToMm;
-                    double dz = (conn.Pos2.Z - conn.Pos1.Z) * ftToMm;
-
-                    double vano     = Math.Sqrt(dx * dx + dy * dy);
-                    double desnivel = Math.Abs(dz);
-
-                    lines.Add(string.Join(";",
-                        conn.CN.ToString(Inv),
-                        name1,
-                        name2,
-                        vano.ToString("F4", Inv),
-                        desnivel.ToString("F4", Inv)));
-                }
-
-                // ── 6. Save file (queued to dispatcher after handler returns) ─
-                string statusMsg = $"✔ {connections.Count} connections processed.";
-                List<string> csvSnapshot = new List<string>(lines);
-
-                UI?.Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    var dlg = new Microsoft.Win32.SaveFileDialog
-                    {
-                        Filter   = "CSV Files (*.csv)|*.csv",
-                        Title    = "Save Electrical Flow Report",
-                        FileName = "ElectricalFlowReport.csv"
-                    };
-
-                    if (dlg.ShowDialog() == true)
-                    {
-                        File.WriteAllLines(dlg.FileName, csvSnapshot);
-                        UI?.SetStatus(statusMsg + " CSV saved.");
-                    }
-                    else
-                    {
-                        UI?.SetStatus(statusMsg + " CSV export cancelled.");
-                    }
-                }));
             }
             catch (Exception ex)
             {
-                UI?.SetStatus("Error: " + ex.Message);
+                UI?.SetStatus("DBG Exception: " + ex.GetType().Name + " — " + ex.Message);
             }
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Reads the position from the first adaptive reference point of a
-        /// FamilyInstance, falling back to LocationPoint if none found.
-        /// </summary>
         private static XYZ GetAdaptivePosition(Document doc, FamilyInstance fi)
         {
             try
@@ -441,104 +259,39 @@ namespace HMVTools
             return (fi.Location as LocationPoint)?.Point ?? XYZ.Zero;
         }
 
-        /// <summary>
-        /// Applies the selected sort directions to a list of points.
-        /// Coordinates are rounded to 3 decimal places (feet) to avoid
-        /// Revit floating-point micro-tolerance ordering noise.
-        /// </summary>
-        private static List<(ElementId Id, XYZ Pos)> ApplySort(
-            List<(ElementId Id, XYZ Pos)> pts,
-            SortXDirection sortX,
-            SortYDirection sortY)
-        {
-            IEnumerable<(ElementId Id, XYZ Pos)> result = pts;
-
-            // All 4 combinations of X + Y then the two single-axis cases
-            if (sortX == SortXDirection.Right && sortY == SortYDirection.Up)
-                result = pts.OrderBy(p => Math.Round(p.Pos.X, 3))
-                            .ThenBy(p => Math.Round(p.Pos.Y, 3));
-            else if (sortX == SortXDirection.Right && sortY == SortYDirection.Down)
-                result = pts.OrderBy(p => Math.Round(p.Pos.X, 3))
-                            .ThenByDescending(p => Math.Round(p.Pos.Y, 3));
-            else if (sortX == SortXDirection.Left && sortY == SortYDirection.Up)
-                result = pts.OrderByDescending(p => Math.Round(p.Pos.X, 3))
-                            .ThenBy(p => Math.Round(p.Pos.Y, 3));
-            else if (sortX == SortXDirection.Left && sortY == SortYDirection.Down)
-                result = pts.OrderByDescending(p => Math.Round(p.Pos.X, 3))
-                            .ThenByDescending(p => Math.Round(p.Pos.Y, 3));
-            else if (sortX == SortXDirection.Right)
-                result = pts.OrderBy(p => Math.Round(p.Pos.X, 3));
-            else if (sortX == SortXDirection.Left)
-                result = pts.OrderByDescending(p => Math.Round(p.Pos.X, 3));
-            else if (sortY == SortYDirection.Up)
-                result = pts.OrderBy(p => Math.Round(p.Pos.Y, 3));
-            else if (sortY == SortYDirection.Down)
-                result = pts.OrderByDescending(p => Math.Round(p.Pos.Y, 3));
-            // SortX == None && SortY == None → preserve pick order
-
-            return result.ToList();
-        }
-
-        /// <summary>
-        /// Returns the nearest FamilyInstance from allEquipment to the given position.
-        /// Uses LocationPoint for speed (equipment is literally on top of the adaptive point).
-        /// </summary>
         private static FamilyInstance FindClosestEquipment(
-            List<FamilyInstance> allEquipment, XYZ position)
+            List<FamilyInstance> candidates, XYZ position)
         {
             FamilyInstance closest = null;
             double minDist = double.MaxValue;
 
-            foreach (FamilyInstance eq in allEquipment)
+            foreach (FamilyInstance eq in candidates)
             {
                 XYZ loc = (eq.Location as LocationPoint)?.Point;
                 if (loc == null) continue;
 
                 double dist = position.DistanceTo(loc);
-                if (dist < minDist)
-                {
-                    minDist = dist;
-                    closest = eq;
-                }
+                if (dist < minDist) { minDist = dist; closest = eq; }
             }
 
             return closest;
         }
 
-        /// <summary>
-        /// Reads a parameter value from a FamilyInstance.
-        /// Checks the instance parameters first; if not found there, explicitly
-        /// walks the family Symbol's parameters (covers shared Type parameters
-        /// which LookupParameter on the instance may silently skip when an
-        /// instance param of the same name shadows it at a different binding).
-        /// </summary>
         private static string GetParamStringValueWithTypeFallback(FamilyInstance fi, string paramName)
         {
             if (fi == null || string.IsNullOrWhiteSpace(paramName)) return string.Empty;
 
-            // 1. Try instance-level parameter first
             Parameter p = fi.LookupParameter(paramName);
 
-            // 2. If not found, has no value, or is an empty string, explicitly search
-            //    the Symbol's type parameters — LookupParameter on the instance may
-            //    return a shadowing instance param with an empty value instead of the
-            //    populated type param of the same name.
             bool instanceEmpty = p == null
                 || !p.HasValue
                 || (p.StorageType == StorageType.String && string.IsNullOrEmpty(p.AsString()));
 
-            if (instanceEmpty)
+            if (instanceEmpty && fi.Symbol != null)
             {
-                if (fi.Symbol != null)
+                foreach (Parameter sp in fi.Symbol.Parameters)
                 {
-                    foreach (Parameter sp in fi.Symbol.Parameters)
-                    {
-                        if (sp.Definition.Name == paramName)
-                        {
-                            p = sp;
-                            break;
-                        }
-                    }
+                    if (sp.Definition.Name == paramName) { p = sp; break; }
                 }
             }
 
@@ -559,23 +312,6 @@ namespace HMVTools
             Parameter p = fi.LookupParameter(paramName);
             if (p == null || p.IsReadOnly || p.StorageType != StorageType.String) return;
             p.Set(value ?? string.Empty);
-        }
-
-        private static void SetIntOrStringParam(FamilyInstance fi, string paramName, string value)
-        {
-            if (fi == null || string.IsNullOrWhiteSpace(paramName)) return;
-            Parameter p = fi.LookupParameter(paramName);
-            if (p == null || p.IsReadOnly) return;
-
-            switch (p.StorageType)
-            {
-                case StorageType.String:
-                    p.Set(value);
-                    break;
-                case StorageType.Integer:
-                    if (int.TryParse(value, out int iv)) p.Set(iv);
-                    break;
-            }
         }
     }
 }
