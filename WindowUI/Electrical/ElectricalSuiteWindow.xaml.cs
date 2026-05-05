@@ -18,11 +18,13 @@ namespace HMVTools
         private ExternalEvent _flowExportEvent;
         private ElectricalFlowWindow _flowWindow;
 
-        private ElectricalRefresherPickHandler _refreshPickHandler;
-        private ExternalEvent                  _refreshPickEvent;
-        private ElectricalRefresherHandler     _refreshRunHandler;
-        private ExternalEvent                  _refreshRunEvent;
-        private ElectricalRefresherWindow      _refreshWindow;
+        private ElectricalRefresherPickHandler    _refreshPickHandler;
+        private ExternalEvent                      _refreshPickEvent;
+        private ElectricalRefresherHandler         _refreshRunHandler;
+        private ExternalEvent                      _refreshRunEvent;
+        private MirrorFlexPipeRefresherHandler     _refreshMirrorHandler;
+        private ExternalEvent                      _refreshMirrorEvent;
+        private ElectricalRefresherWindow          _refreshWindow;
 
         private ElectricalGeometryHandler _geomHandler;
         private ExternalEvent             _geomEvent;
@@ -40,10 +42,12 @@ namespace HMVTools
             _flowExportHandler = new ElectricalFlowExportHandler();
             _flowExportEvent   = ExternalEvent.Create(_flowExportHandler);
 
-            _refreshPickHandler = new ElectricalRefresherPickHandler();
-            _refreshPickEvent   = ExternalEvent.Create(_refreshPickHandler);
-            _refreshRunHandler  = new ElectricalRefresherHandler();
-            _refreshRunEvent    = ExternalEvent.Create(_refreshRunHandler);
+            _refreshPickHandler   = new ElectricalRefresherPickHandler();
+            _refreshPickEvent    = ExternalEvent.Create(_refreshPickHandler);
+            _refreshRunHandler   = new ElectricalRefresherHandler();
+            _refreshRunEvent     = ExternalEvent.Create(_refreshRunHandler);
+            _refreshMirrorHandler = new MirrorFlexPipeRefresherHandler();
+            _refreshMirrorEvent  = ExternalEvent.Create(_refreshMirrorHandler);
 
             // Geometry handler — must be created here in the valid Revit API context
             var geomDoc = uiapp.ActiveUIDocument.Document;
@@ -149,8 +153,9 @@ namespace HMVTools
 
             _refreshWindow = new ElectricalRefresherWindow(
                 _uiapp,
-                _refreshPickHandler, _refreshPickEvent,
-                _refreshRunHandler,  _refreshRunEvent);
+                _refreshPickHandler,   _refreshPickEvent,
+                _refreshRunHandler,    _refreshRunEvent,
+                _refreshMirrorHandler, _refreshMirrorEvent);
 
             var helper = new System.Windows.Interop.WindowInteropHelper(_refreshWindow);
             helper.Owner = new System.Windows.Interop.WindowInteropHelper(this).Handle;

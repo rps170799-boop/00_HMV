@@ -116,6 +116,12 @@
                             Cursor="Hand" Click="BtnReset_Click"
                             ToolTip="Delete FlexPipes and reset Connected flag on selected points"/>
 
+                    <Button Content="🔀 Mirror" FontSize="10" Height="32" Width="80"
+                            Background="#5A4A8A" Foreground="White" BorderThickness="0"
+                            Cursor="Hand" Margin="0,0,8,0"
+                            ToolTip="Pick FlexPipe(s) and mirror each about its own A-B axis"
+                            Click="BtnMirrorFlexPipe_Click"/>
+
                     <Button Content="Cancel" FontSize="10" Height="32" Width="80"
                             Background="#E8E8F0" Foreground="#3C3C3C" BorderThickness="0"
                             Cursor="Hand" Margin="0,0,8,0" Click="BtnClose_Click"/>

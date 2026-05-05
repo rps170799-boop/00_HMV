@@ -43,11 +43,13 @@ namespace HMVTools
     [Transaction(TransactionMode.Manual)]
     public class ElectricalRefresherCommand : IExternalCommand
     {
-        private static ElectricalRefresherPickHandler _pickHandler = null;
-        private static ExternalEvent                  _pickEvent   = null;
-        private static ElectricalRefresherHandler     _runHandler  = null;
-        private static ExternalEvent                  _runEvent    = null;
-        private static ElectricalRefresherWindow      _window      = null;
+        private static ElectricalRefresherPickHandler      _pickHandler   = null;
+        private static ExternalEvent                        _pickEvent     = null;
+        private static ElectricalRefresherHandler           _runHandler    = null;
+        private static ExternalEvent                        _runEvent      = null;
+        private static MirrorFlexPipeRefresherHandler       _mirrorHandler = null;
+        private static ExternalEvent                        _mirrorEvent   = null;
+        private static ElectricalRefresherWindow            _window        = null;
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
@@ -57,15 +59,18 @@ namespace HMVTools
                 return Result.Succeeded;
             }
 
-            _pickHandler = new ElectricalRefresherPickHandler();
-            _pickEvent   = ExternalEvent.Create(_pickHandler);
-            _runHandler  = new ElectricalRefresherHandler();
-            _runEvent    = ExternalEvent.Create(_runHandler);
+            _pickHandler   = new ElectricalRefresherPickHandler();
+            _pickEvent     = ExternalEvent.Create(_pickHandler);
+            _runHandler    = new ElectricalRefresherHandler();
+            _runEvent      = ExternalEvent.Create(_runHandler);
+            _mirrorHandler = new MirrorFlexPipeRefresherHandler();
+            _mirrorEvent   = ExternalEvent.Create(_mirrorHandler);
 
             _window = new ElectricalRefresherWindow(
                 commandData.Application,
-                _pickHandler, _pickEvent,
-                _runHandler,  _runEvent);
+                _pickHandler,   _pickEvent,
+                _runHandler,    _runEvent,
+                _mirrorHandler, _mirrorEvent);
 
             var helper = new System.Windows.Interop.WindowInteropHelper(_window);
             helper.Owner = commandData.Application.MainWindowHandle;
@@ -361,7 +366,17 @@ namespace HMVTools
                         XYZ pointA = ptInicial.pos;
                         XYZ pointB = ptFinal.pos;
 
-                        List<XYZ> trajectory = CalculateTrajectory(groupRawPoints, pointA, pointB);
+                        // Mirror is not auto-detected — use the 🔀 Mirror button on any wrong-side result.
+                        // When swapped, reverse DXF so its start always aligns with ptInicial.
+                        // This preserves asymmetric bulge position regardless of which point is A or B.
+                        List<XYZ> dxfPoints = swapPoints
+                            ? Enumerable.Reverse(groupRawPoints).ToList()
+                            : groupRawPoints;
+
+                        // Mirror compensates for the lateral axis flip caused by swap.
+                        bool mirrorCurve = !swapPoints;
+
+                        List<XYZ> trajectory = CalculateTrajectory(dxfPoints, pointA, pointB, mirrorCurve);
                         trajectory = ResampleTrajectory(trajectory, 0.5);
 
                         double minClearance = 0.5;
@@ -399,6 +414,11 @@ namespace HMVTools
                                 UI?.Log($"  [{cnx}] Error: FlexPipe.Create returned null.");
                                 skipped++;
                                 continue;
+                            }
+
+                            Parameter diamParam = flexPipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM);
+                            if (diamParam != null && !diamParam.IsReadOnly) { 
+                                diamParam.Set(UnitUtils.ConvertToInternalUnits(0.75,UnitTypeId.Inches));
                             }
 
                             TrySetStringParam(flexPipe, Config.FlexCnxNumberParam,    cnx);
@@ -556,7 +576,7 @@ namespace HMVTools
 
         // ── Trajectory — mirrors ElectricalConnectionCommand.CalculateTrajectory ──
 
-        private static List<XYZ> CalculateTrajectory(List<XYZ> dxfPoints, XYZ originA, XYZ originB)
+        private static List<XYZ> CalculateTrajectory(List<XYZ> dxfPoints, XYZ originA, XYZ originB, bool mirror = false)
         {
             XYZ dxfStart = dxfPoints[0];
             XYZ dxfEnd   = dxfPoints[dxfPoints.Count - 1];
@@ -578,15 +598,16 @@ namespace HMVTools
                 ? XYZ.BasisX
                 : horizontalNormal.Normalize().CrossProduct(uRev).Normalize();
 
-            double scale = revLen / dxfLen;
+            double scale       = revLen / dxfLen;
+            double deviateSign = mirror ? -1.0 : 1.0;
 
             var transformed = new List<XYZ>();
             foreach (XYZ pt in dxfPoints)
             {
-                XYZ local    = pt - dxfStart;
+                XYZ    local   = pt - dxfStart;
                 double along   = local.DotProduct(uDxf);
                 double deviate = local.DotProduct(vDxf);
-                transformed.Add(originA + (uRev * along * scale) + (vRev * deviate * scale));
+                transformed.Add(originA + (uRev * along * scale) + (vRev * deviate * deviateSign * scale));
             }
 
             transformed[transformed.Count - 1] = originB;
@@ -779,6 +800,114 @@ namespace HMVTools
             Parameter p = fi.LookupParameter(paramName);
             if (p == null || p.IsReadOnly || p.StorageType != StorageType.Integer) return;
             p.Set(1);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  MIRROR SUPPORT
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Picks one or more FlexPipes and mirrors each about its own A→B axis,
+    /// flipping the bulge to the opposite side. Deletes the originals.
+    /// </summary>
+    public class MirrorFlexPipeRefresherHandler : IExternalEventHandler
+    {
+        public ElectricalRefresherWindow UI { get; set; }
+
+        public string GetName() => "MirrorFlexPipeRefresherHandler";
+
+        public void Execute(UIApplication app)
+        {
+            UIDocument uidoc = app.ActiveUIDocument;
+            Document   doc   = uidoc.Document;
+
+            try
+            {
+                // ── 1. Pick one or more FlexPipes ────────────────────────────
+                IList<Reference> refs = uidoc.Selection.PickObjects(
+                    ObjectType.Element,
+                    new FlexPipeSelectionFilter(),
+                    "Select FlexPipe(s) to mirror — click Finish when done");
+
+                if (refs == null || refs.Count == 0)
+                {
+                    UI?.SetStatus("No FlexPipes selected.");
+                    UI?.RestoreWindow();
+                    return;
+                }
+
+                int mirrored = 0;
+                int failed   = 0;
+
+                using (Transaction t = new Transaction(doc, "HMV - Mirror FlexPipe(s)"))
+                {
+                    t.Start();
+
+                    FailureHandlingOptions fho = t.GetFailureHandlingOptions();
+                    fho.SetFailuresPreprocessor(new WarningSuppressor());
+                    t.SetFailureHandlingOptions(fho);
+
+                    foreach (Reference elemRef in refs)
+                    {
+                        FlexPipe flexPipe = doc.GetElement(elemRef) as FlexPipe;
+                        if (flexPipe == null) { failed++; continue; }
+
+                        // ── 2. Get trajectory points ──────────────────────────
+                        IList<XYZ> pts = flexPipe.Points;
+                        if (pts == null || pts.Count < 3) { failed++; continue; }
+
+                        XYZ ptA = pts[0];
+                        XYZ ptB = pts[pts.Count - 1];
+                        XYZ uAB = (ptB - ptA).Normalize();
+
+                        // ── 3. Find the maximum-deviation (bulge) point ────────
+                        XYZ bulgePt  = null;
+                        double maxDev = 0.0;
+
+                        for (int i = 1; i < pts.Count - 1; i++)
+                        {
+                            XYZ local     = pts[i] - ptA;
+                            double along  = local.DotProduct(uAB);
+                            XYZ projected = ptA + uAB * along;
+                            double dev    = pts[i].DistanceTo(projected);
+                            if (dev > maxDev) { maxDev = dev; bulgePt = pts[i]; }
+                        }
+
+                        if (bulgePt == null || maxDev < 1e-6) { failed++; continue; }
+
+                        // ── 4. Build mirror plane ──────────────────────────────
+                        XYZ local2     = bulgePt - ptA;
+                        double along2  = local2.DotProduct(uAB);
+                        XYZ projected2 = ptA + uAB * along2;
+                        XYZ bulgeDir   = (bulgePt - projected2).Normalize();
+
+                        Plane mirrorPlane = Plane.CreateByNormalAndOrigin(bulgeDir, ptA);
+
+                        // ── 5. Mirror + delete original ────────────────────────
+                        ElementTransformUtils.MirrorElement(doc, flexPipe.Id, mirrorPlane);
+                        doc.Delete(flexPipe.Id);
+
+                        mirrored++;
+                    }
+
+                    t.Commit();
+                }
+
+                UI?.SetStatus($"✔ {mirrored} FlexPipe(s) mirrored" +
+                              (failed > 0 ? $", {failed} skipped (too few points)." : "."));
+                UI?.RestoreWindow();
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                UI?.SetStatus("Mirror canceled by user.");
+                UI?.RestoreWindow();
+            }
+            catch (Exception ex)
+            {
+                UI?.SetStatus("Mirror error: " + ex.Message);
+                UI?.RestoreWindow();
+            }
         }
     }
 }

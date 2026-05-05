@@ -173,9 +173,21 @@ namespace HMVTools
 
                 // ── 1c. Pre-cache bounding-box centers (avoid repeated get_BoundingBox) ──
                 var candidateCache = candidateEquipment
-                    .Select(eq => new EquipmentCache { Eq = eq, Center = GetEquipmentCenter(eq) })
-                    .Where(x => x.Center != null)
-                    .ToList();
+                .Select(eq =>
+                {
+                    BoundingBoxXYZ bb = null;
+                    try { bb = eq.get_BoundingBox(null); } catch { }
+                    if (bb == null) return new EquipmentCache { Eq = eq, Center = null };
+                    return new EquipmentCache
+                    {
+                        Eq = eq,
+                        Center = (bb.Min + bb.Max) * 0.5,
+                        BbMin = bb.Min,
+                        BbMax = bb.Max
+                    };
+                })
+                .Where(x => x.Center != null)
+                .ToList();
 
                 UI?.SetStatus($"DBG Step 1c: {candidateCache.Count} candidates with valid locations.");
 
@@ -282,37 +294,29 @@ namespace HMVTools
         }
 
         private static FamilyInstance FindClosestEquipment(
-        List<EquipmentCache> cachedCandidates, XYZ position)
+    List<EquipmentCache> cachedCandidates, XYZ position)
         {
             if (cachedCandidates.Count == 0) return null;
 
-            // ── Pass 1: cheap bbox-center distance → keep top 3 ──
-            const int shortlistSize = 3;
+            const double maxRadiusFt = 50.0; // skip matches farther than this in XY
 
-            var ranked = cachedCandidates
-                .Select(c => new { c.Eq, c.Center, Dist = position.DistanceTo(c.Center) })
-                .OrderBy(x => x.Dist)
-                .Take(shortlistSize)
-                .ToList();
-
-            // If only one candidate survives, skip geometry entirely
-            if (ranked.Count == 1) return ranked[0].Eq;
-
-            // ── Pass 2: expensive face-distance only on shortlist ──
             FamilyInstance closest = null;
             double minDist = double.MaxValue;
 
-            foreach (var r in ranked)
+            foreach (var c in cachedCandidates)
             {
-                double dist = GetMinDistanceToGeometry(r.Eq, position);
+                // Clamp point XY to bbox extents → nearest point on bbox edge (2D)
+                double nearestX = Math.Max(c.BbMin.X, Math.Min(position.X, c.BbMax.X));
+                double nearestY = Math.Max(c.BbMin.Y, Math.Min(position.Y, c.BbMax.Y));
 
-                // Fallback to bbox center if no solid faces found
-                if (dist < 0) dist = r.Dist;
+                double dx = position.X - nearestX;
+                double dy = position.Y - nearestY;
+                double dist2D = Math.Sqrt(dx * dx + dy * dy);
 
-                if (dist < minDist)
+                if (dist2D < minDist && dist2D <= maxRadiusFt)
                 {
-                    minDist = dist;
-                    closest = r.Eq;
+                    minDist = dist2D;
+                    closest = c.Eq;
                 }
             }
 
@@ -322,31 +326,10 @@ namespace HMVTools
         {
             public FamilyInstance Eq;
             public XYZ Center;
+            public XYZ BbMin;
+            public XYZ BbMax;
         }
-        private static double GetMinDistanceToGeometry(FamilyInstance eq, XYZ position)
-        {
-            try
-            {
-                Options opts = new Options
-                {
-                    DetailLevel = ViewDetailLevel.Coarse,
-                    ComputeReferences = false
-                };
-
-                GeometryElement geomElem = eq.get_Geometry(opts);
-                if (geomElem == null) return -1;
-
-                double minDist = double.MaxValue;
-                WalkGeometry(geomElem, position, ref minDist);
-
-                return minDist < double.MaxValue ? minDist : -1;
-            }
-            catch
-            {
-                return -1;
-            }
-        }
-
+        
         private static void WalkGeometry(GeometryElement geomElem, XYZ position, ref double minDist)
         {
             foreach (GeometryObject geomObj in geomElem)

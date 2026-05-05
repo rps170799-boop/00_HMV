@@ -11,30 +11,36 @@ namespace HMVTools
 {
     public partial class ElectricalRefresherWindow : Window
     {
-        private readonly UIApplication            _uiapp;
-        private readonly ElectricalRefresherPickHandler _pickHandler;
-        private readonly ExternalEvent                  _pickEvent;
-        private readonly ElectricalRefresherHandler     _runHandler;
-        private readonly ExternalEvent                  _runEvent;
+        private readonly UIApplication                      _uiapp;
+        private readonly ElectricalRefresherPickHandler    _pickHandler;
+        private readonly ExternalEvent                     _pickEvent;
+        private readonly ElectricalRefresherHandler        _runHandler;
+        private readonly ExternalEvent                     _runEvent;
+        private readonly MirrorFlexPipeRefresherHandler    _mirrorHandler;
+        private readonly ExternalEvent                     _mirrorEvent;
 
-        private List<ElementId>          _pointIds = new List<ElementId>();
-        private ElectricalRefresherConfig _config   = new ElectricalRefresherConfig();
+        private List<ElementId>           _pointIds = new List<ElementId>();
+        private ElectricalRefresherConfig  _config   = new ElectricalRefresherConfig();
 
         public ElectricalRefresherWindow(
             UIApplication                   uiapp,
-            ElectricalRefresherPickHandler  pickHandler, ExternalEvent pickEvent,
-            ElectricalRefresherHandler      runHandler,  ExternalEvent runEvent)
+            ElectricalRefresherPickHandler  pickHandler,   ExternalEvent pickEvent,
+            ElectricalRefresherHandler      runHandler,    ExternalEvent runEvent,
+            MirrorFlexPipeRefresherHandler  mirrorHandler, ExternalEvent mirrorEvent)
         {
             InitializeComponent();
 
-            _uiapp       = uiapp;
-            _pickHandler = pickHandler;
-            _pickEvent   = pickEvent;
-            _runHandler  = runHandler;
-            _runEvent    = runEvent;
+            _uiapp         = uiapp;
+            _pickHandler   = pickHandler;
+            _pickEvent     = pickEvent;
+            _runHandler    = runHandler;
+            _runEvent      = runEvent;
+            _mirrorHandler = mirrorHandler;
+            _mirrorEvent   = mirrorEvent;
 
-            _pickHandler.UI = this;
-            _runHandler.UI  = this;
+            _pickHandler.UI   = this;
+            _runHandler.UI    = this;
+            _mirrorHandler.UI = this;
 
             this.Closed += (s, e) => ElectricalRefresherCommand.ClearWindow();
         }
@@ -209,6 +215,13 @@ namespace HMVTools
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e) => this.Close();
+
+        private void BtnMirrorFlexPipe_Click(object sender, RoutedEventArgs e)
+        {
+            _mirrorHandler.UI = this;
+            this.Hide();
+            _mirrorEvent.Raise();
+        }
 
         private void TopBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => this.DragMove();
 
