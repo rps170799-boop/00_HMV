@@ -49,6 +49,8 @@ namespace HMVTools
         private static ExternalEvent                        _runEvent      = null;
         private static MirrorFlexPipeRefresherHandler       _mirrorHandler = null;
         private static ExternalEvent                        _mirrorEvent   = null;
+        private static RegenerateFlexPipeHandler            _regenHandler  = null;
+        private static ExternalEvent                        _regenEvent    = null;
         private static ElectricalRefresherWindow            _window        = null;
 
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
@@ -65,12 +67,15 @@ namespace HMVTools
             _runEvent      = ExternalEvent.Create(_runHandler);
             _mirrorHandler = new MirrorFlexPipeRefresherHandler();
             _mirrorEvent   = ExternalEvent.Create(_mirrorHandler);
+            _regenHandler  = new RegenerateFlexPipeHandler();
+            _regenEvent    = ExternalEvent.Create(_regenHandler);
 
             _window = new ElectricalRefresherWindow(
                 commandData.Application,
                 _pickHandler,   _pickEvent,
                 _runHandler,    _runEvent,
-                _mirrorHandler, _mirrorEvent);
+                _mirrorHandler, _mirrorEvent,
+                _regenHandler,  _regenEvent);
 
             var helper = new System.Windows.Interop.WindowInteropHelper(_window);
             helper.Owner = commandData.Application.MainWindowHandle;
@@ -481,91 +486,7 @@ namespace HMVTools
             UI?.SetStatus($"✔ {created} FlexPipe(s) created, {skipped} skipped.");
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        //  AUTO-ORIENTATION — deviation profile fingerprint
-        // ═══════════════════════════════════════════════════════════════════
-
-        /// <summary>
-        /// Samples the UNSIGNED perpendicular deviation of a polyline from its chord
-        /// at uniform arc-length fractions. Unsigned so it's comparable across
-        /// different coordinate systems (DXF space vs Revit space).
-        /// </summary>
-        private static double[] ComputeDeviationProfileUnsigned(
-            IList<XYZ> polyline, XYZ chordStart, XYZ chordEnd, int sampleCount)
-        {
-            XYZ    chordVec = chordEnd - chordStart;
-            double chordLen = chordVec.GetLength();
-            var    profile  = new double[sampleCount];
-
-            if (chordLen < 1e-9 || polyline.Count < 2) return profile;
-
-            XYZ uAB = chordVec.Normalize();
-
-            // Build cumulative arc-length table
-            var arcLen = new double[polyline.Count];
-            arcLen[0] = 0;
-            for (int i = 1; i < polyline.Count; i++)
-                arcLen[i] = arcLen[i - 1] + polyline[i].DistanceTo(polyline[i - 1]);
-
-            double totalArc = arcLen[polyline.Count - 1];
-            if (totalArc < 1e-9) return profile;
-
-            for (int s = 0; s < sampleCount; s++)
-            {
-                double targetArc = totalArc * (s + 1) / (sampleCount + 1);
-
-                // Find segment
-                int seg = 1;
-                while (seg < polyline.Count - 1 && arcLen[seg] < targetArc) seg++;
-
-                double segLen = arcLen[seg] - arcLen[seg - 1];
-                double segFrac = segLen > 1e-9
-                    ? (targetArc - arcLen[seg - 1]) / segLen
-                    : 0;
-
-                XYZ pt = polyline[seg - 1] + (polyline[seg] - polyline[seg - 1]) * segFrac;
-
-                // Unsigned perpendicular distance to chord
-                XYZ local     = pt - chordStart;
-                double along  = local.DotProduct(uAB);
-                XYZ projected = chordStart + uAB * along;
-                profile[s]    = pt.DistanceTo(projected);  // unsigned!
-            }
-
-            return profile;
-        }
-
-        /// <summary>
-        /// Returns true if reversing the DXF point order would better match the Revit curve.
-        /// Sets <paramref name="isSymmetric"/> = true when forward and reverse scores are
-        /// within 1 % of each other (ambiguous — no auto-correction applied).
-        /// </summary>
-        private static bool CheckNeedsReverse(
-            double[] dxfProfile, double[] rvtProfile, out bool isSymmetric)
-        {
-            isSymmetric = false;
-            int n = Math.Min(dxfProfile.Length, rvtProfile.Length);
-            if (n == 0) return false;
-
-            double forwardScore = 0;
-            double reverseScore = 0;
-
-            for (int i = 0; i < n; i++)
-            {
-                forwardScore += dxfProfile[i] * rvtProfile[i];
-                reverseScore += dxfProfile[n - 1 - i] * rvtProfile[i];
-            }
-
-            double magnitude = Math.Max(Math.Abs(forwardScore), Math.Abs(reverseScore));
-            if (magnitude > 1e-9 &&
-                Math.Abs(forwardScore - reverseScore) / magnitude < 0.01)
-            {
-                isSymmetric = true;
-                return false;
-            }
-
-            return reverseScore > forwardScore;
-        }
+        
 
         // ═══════════════════════════════════════════════════════════════════
         //  DXF HELPERS
@@ -957,6 +878,455 @@ namespace HMVTools
                 UI?.SetStatus("Mirror error: " + ex.Message);
                 UI?.RestoreWindow();
             }
+        }
+    }
+    // ═══════════════════════════════════════════════════════════════════
+    //  REGENERATE — re-create existing FlexPipes from their stored metadata
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Picks one or more FlexPipes, reads their stored HMV parameters and
+    /// endpoint positions, rebuilds each trajectory from the matching DXF
+    /// file, then deletes the original and creates a new FlexPipe in its place.
+    /// All parameters are snapshotted before deletion and fully restored.
+    /// FlexPipes whose CNX_NUMBER has no matching DXF are left untouched.
+    /// </summary>
+    public class RegenerateFlexPipeHandler : IExternalEventHandler
+    {
+        public ElectricalRefresherWindow UI      { get; set; }
+        public ElectricalRefresherConfig Config  { get; set; }
+
+        public string GetName() => "RegenerateFlexPipeHandler";
+
+        // ── Parameter snapshot (mirrors ReshapeFlexPipeCommand) ──────────
+        private struct ParamSnapshot
+        {
+            public string      Name;
+            public StorageType Storage;
+            public string      StrVal;
+            public double      DblVal;
+            public int         IntVal;
+        }
+
+        public void Execute(UIApplication app)
+        {
+            UIDocument uidoc = app.ActiveUIDocument;
+            Document   doc   = uidoc.Document;
+
+            if (Config == null || string.IsNullOrWhiteSpace(Config.DxfFolder))
+            {
+                UI?.SetStatus("Error: Open ⚙ Config and complete DXF folder first.");
+                UI?.RestoreWindow();
+                return;
+            }
+
+            try
+            {
+                IList<Reference> refs = uidoc.Selection.PickObjects(
+                    ObjectType.Element,
+                    new FlexPipeSelectionFilter(),
+                    "Select FlexPipe(s) to regenerate — click Finish when done");
+
+                if (refs == null || refs.Count == 0)
+                {
+                    UI?.SetStatus("No FlexPipes selected.");
+                    UI?.RestoreWindow();
+                    return;
+                }
+
+                UI?.Log("── REGENERATE MODE ──────────────────────────────");
+
+                if (!Directory.Exists(Config.DxfFolder))
+                {
+                    UI?.Log("Error: DXF folder not found — check configuration.");
+                    UI?.RestoreWindow();
+                    return;
+                }
+
+                Dictionary<string, string> dxfMap = BuildDxfMap(Config.DxfFolder);
+
+                Level defaultLevel = new FilteredElementCollector(doc)
+                    .OfClass(typeof(Level))
+                    .Cast<Level>()
+                    .OrderBy(l => l.Elevation)
+                    .FirstOrDefault();
+
+                if (defaultLevel == null)
+                {
+                    UI?.Log("Error: No Level found in project.");
+                    UI?.RestoreWindow();
+                    return;
+                }
+
+                int regenerated = 0;
+                int skipped     = 0;
+
+                foreach (Reference elemRef in refs)
+                {
+                    FlexPipe pipe = doc.GetElement(elemRef) as FlexPipe;
+                    if (pipe == null) { skipped++; continue; }
+
+                    string cnx = GetStringParam(pipe, Config.FlexCnxNumberParam);
+                    if (string.IsNullOrWhiteSpace(cnx))
+                    {
+                        UI?.Log($"  Skip {pipe.Id}: no {Config.FlexCnxNumberParam}.");
+                        skipped++;
+                        continue;
+                    }
+
+                    if (!dxfMap.TryGetValue(cnx, out string dxfPath))
+                    {
+                        UI?.Log($"  [{cnx}] Warning: no DXF file found. Skipped (pipe untouched).");
+                        skipped++;
+                        continue;
+                    }
+
+                    IList<XYZ> pipePts = pipe.Points;
+                    if (pipePts == null || pipePts.Count < 2)
+                    {
+                        UI?.Log($"  [{cnx}] Skip {pipe.Id}: insufficient points.");
+                        skipped++;
+                        continue;
+                    }
+
+                    XYZ pointA = pipePts[0];
+                    XYZ pointB = pipePts[pipePts.Count - 1];
+
+                    List<XYZ> groupRawPoints;
+                    try
+                    {
+                        groupRawPoints = ParseDxfPoints(dxfPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        UI?.Log($"  [{cnx}] DXF read error: {ex.Message}. Skipped.");
+                        skipped++;
+                        continue;
+                    }
+
+                    if (groupRawPoints == null || groupRawPoints.Count < 2)
+                    {
+                        UI?.Log($"  [{cnx}] Error: DXF has insufficient points. Skipped.");
+                        skipped++;
+                        continue;
+                    }
+
+                    // ── Snapshot all parameters before touching anything ──────
+                    ElementId typeId   = pipe.FlexPipeType.Id;
+                    ElementId levelId  = GetLevelId(doc, pipe, defaultLevel);
+                    ElementId systemId = GetSystemTypeId(doc, pipe);
+                    List<ParamSnapshot> snapshots = SnapshotParameters(pipe);
+
+                    // ── Orientation: same dot-product logic as ExecuteRefresh ──
+                    double ftToMm      = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
+                    double rvtDx       = (pointB.X - pointA.X) * ftToMm;
+                    double rvtDy       = (pointB.Y - pointA.Y) * ftToMm;
+                    double rvtVano     = Math.Sqrt(rvtDx * rvtDx + rvtDy * rvtDy);
+                    double rvtDesnivel = Math.Abs((pointB.Z - pointA.Z) * ftToMm);
+
+                    XYZ dxfStart = groupRawPoints[0];
+                    XYZ dxfEnd   = groupRawPoints[groupRawPoints.Count - 1];
+                    XYZ dxfVec2D = new XYZ(dxfEnd.X - dxfStart.X, dxfEnd.Y - dxfStart.Y, 0);
+                    XYZ rvtVec2D = new XYZ(pointB.X - pointA.X, pointB.Y - pointA.Y, 0);
+
+                    double dot;
+                    bool reverseDxf;
+
+                    if (rvtDesnivel > rvtVano * 1.5)
+                    {
+                        double rvtDz = pointB.Z - pointA.Z;
+                        double dxfDy = dxfEnd.Y - dxfStart.Y;
+                        dot        = dxfDy * rvtDz;
+                        reverseDxf = dot < 0;
+                        UI?.Log($"  [{cnx}] Desnivel-dominant → DXF.Y({dxfDy:F2}) × RVT.Z({rvtDz:F2})");
+                    }
+                    else
+                    {
+                        dot        = dxfVec2D.DotProduct(rvtVec2D);
+                        reverseDxf = dot < 0;
+                    }
+
+                    UI?.Log($"  [{cnx}] dot:{dot:F2} → reverse={reverseDxf}");
+
+                    List<XYZ> dxfPoints = reverseDxf
+                        ? Enumerable.Reverse(groupRawPoints).ToList()
+                        : groupRawPoints;
+
+                    List<XYZ> trajectory = CalculateTrajectory(dxfPoints, pointA, pointB, false);
+                    trajectory = ResampleTrajectory(trajectory, 0.5);
+
+                    double minClearance = 0.5;
+                    while (trajectory.Count > 0 && trajectory.First().DistanceTo(pointA) <= minClearance)
+                        trajectory.RemoveAt(0);
+                    while (trajectory.Count > 0 && trajectory.Last().DistanceTo(pointB) <= minClearance)
+                        trajectory.RemoveAt(trajectory.Count - 1);
+
+                    trajectory.Insert(0, pointA);
+                    trajectory.Add(pointB);
+
+                    XYZ startTangent = (trajectory[1] - trajectory[0]).Normalize();
+                    XYZ endTangent   = (trajectory[trajectory.Count - 1] - trajectory[trajectory.Count - 2]).Normalize();
+
+                    try
+                    {
+                        using (Transaction trans = new Transaction(doc, "HMV - Regenerate FlexPipe " + cnx))
+                        {
+                            trans.Start();
+
+                            FailureHandlingOptions fho = trans.GetFailureHandlingOptions();
+                            fho.SetFailuresPreprocessor(new WarningSuppressor());
+                            trans.SetFailureHandlingOptions(fho);
+
+                            doc.Delete(pipe.Id);
+
+                            FlexPipe newPipe = FlexPipe.Create(
+                                doc, systemId, typeId, levelId,
+                                startTangent, endTangent, trajectory);
+
+                            if (newPipe == null)
+                            {
+                                trans.RollBack();
+                                UI?.Log($"  [{cnx}] Error: FlexPipe.Create returned null.");
+                                skipped++;
+                                continue;
+                            }
+
+                            RestoreParameters(newPipe, snapshots);
+
+                            trans.Commit();
+                        }
+
+                        UI?.Log($"  [{cnx}] ✔ Regenerated ({trajectory.Count} pts)" +
+                                (reverseDxf ? " (reversed)" : ""));
+                        regenerated++;
+                    }
+                    catch (Exception ex)
+                    {
+                        UI?.Log($"  [{cnx}] Exception: {ex.Message}");
+                        skipped++;
+                    }
+                }
+
+                UI?.Log($"── Done: {regenerated} regenerated, {skipped} skipped ──────");
+                UI?.SetStatus($"✔ {regenerated} FlexPipe(s) regenerated, {skipped} skipped.");
+                UI?.RestoreWindow();
+            }
+            catch (Autodesk.Revit.Exceptions.OperationCanceledException)
+            {
+                UI?.SetStatus("Regenerate cancelled.");
+                UI?.RestoreWindow();
+            }
+            catch (Exception ex)
+            {
+                UI?.SetStatus("Regenerate error: " + ex.Message);
+                UI?.RestoreWindow();
+            }
+        }
+
+        // ── Helpers (duplicated from ElectricalRefresherHandler / ReshapeFlexPipeHandler) ──
+
+        private static List<ParamSnapshot> SnapshotParameters(Element elem)
+        {
+            var list = new List<ParamSnapshot>();
+            foreach (Parameter p in elem.Parameters)
+            {
+                if (p.IsReadOnly || p.Definition == null) continue;
+                if (string.IsNullOrWhiteSpace(p.Definition.Name)) continue;
+
+                var snap = new ParamSnapshot { Name = p.Definition.Name, Storage = p.StorageType };
+                switch (p.StorageType)
+                {
+                    case StorageType.String:  snap.StrVal = p.AsString(); break;
+                    case StorageType.Double:  snap.DblVal = p.AsDouble(); break;
+                    case StorageType.Integer: snap.IntVal = p.AsInteger(); break;
+                    default: continue;
+                }
+                list.Add(snap);
+            }
+            return list;
+        }
+
+        private static void RestoreParameters(Element elem, List<ParamSnapshot> snapshots)
+        {
+            foreach (ParamSnapshot snap in snapshots)
+            {
+                Parameter p = elem.LookupParameter(snap.Name);
+                if (p == null || p.IsReadOnly) continue;
+                try
+                {
+                    switch (snap.Storage)
+                    {
+                        case StorageType.String:  if (snap.StrVal != null) p.Set(snap.StrVal); break;
+                        case StorageType.Double:  p.Set(snap.DblVal); break;
+                        case StorageType.Integer: p.Set(snap.IntVal); break;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private static ElementId GetLevelId(Document doc, FlexPipe pipe, Level fallback)
+        {
+            Level lvl = pipe.ReferenceLevel;
+            return lvl != null ? lvl.Id : fallback.Id;
+        }
+
+        private static ElementId GetSystemTypeId(Document doc, FlexPipe pipe)
+        {
+            ConnectorManager cm = pipe.ConnectorManager;
+            if (cm != null)
+                foreach (Connector c in cm.Connectors)
+                    if (c.MEPSystem is PipingSystem ps) return ps.GetTypeId();
+
+            return new FilteredElementCollector(doc)
+                .OfClass(typeof(PipingSystemType))
+                .FirstElementId();
+        }
+
+        private static string GetStringParam(Element elem, string paramName)
+        {
+            if (elem == null || string.IsNullOrWhiteSpace(paramName)) return string.Empty;
+            Parameter p = elem.LookupParameter(paramName);
+            if (p == null) return string.Empty;
+            return p.StorageType == StorageType.String ? p.AsString() ?? string.Empty : string.Empty;
+        }
+
+        private static Dictionary<string, string> BuildDxfMap(string folder)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in Directory.GetFiles(folder, "*.dxf", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileNameWithoutExtension(path);
+                int idx = name.IndexOf('_');
+                string key = idx > 0 ? name.Substring(0, idx) : name;
+                if (!map.ContainsKey(key)) map[key] = path;
+            }
+            return map;
+        }
+
+        private static List<XYZ> ParseDxfPoints(string filePath)
+        {
+            DxfFile dxf = DxfFile.Load(filePath);
+            var points = new List<XYZ>();
+
+            foreach (DxfEntity entity in dxf.Entities)
+            {
+                switch (entity)
+                {
+                    case DxfLwPolyline lw:
+                        foreach (DxfLwPolylineVertex v in lw.Vertices)
+                            points.Add(MmToFeet(v.X, v.Y, 0));
+                        break;
+                    case DxfPolyline poly:
+                        foreach (DxfVertex v in poly.Vertices)
+                            points.Add(MmToFeet(v.Location.X, v.Location.Y, v.Location.Z));
+                        break;
+                    case DxfLine line:
+                        if (points.Count == 0)
+                            points.Add(MmToFeet(line.P1.X, line.P1.Y, line.P1.Z));
+                        points.Add(MmToFeet(line.P2.X, line.P2.Y, line.P2.Z));
+                        break;
+                    case DxfSpline spline:
+                        foreach (DxfControlPoint cp in spline.ControlPoints)
+                            points.Add(MmToFeet(cp.Point.X, cp.Point.Y, cp.Point.Z));
+                        break;
+                }
+            }
+
+            if (points.Count < 2) return null;
+
+            var cleaned = new List<XYZ> { points[0] };
+            for (int i = 1; i < points.Count; i++)
+                if (points[i].DistanceTo(cleaned[cleaned.Count - 1]) > 0.001)
+                    cleaned.Add(points[i]);
+
+            return cleaned;
+        }
+
+        private static XYZ MmToFeet(double x, double y, double z) =>
+            new XYZ(
+                UnitUtils.ConvertToInternalUnits(x, UnitTypeId.Millimeters),
+                UnitUtils.ConvertToInternalUnits(y, UnitTypeId.Millimeters),
+                UnitUtils.ConvertToInternalUnits(z, UnitTypeId.Millimeters));
+
+        private static List<XYZ> CalculateTrajectory(List<XYZ> dxfPoints, XYZ originA, XYZ originB, bool mirror = false)
+        {
+            XYZ dxfStart = dxfPoints[0];
+            XYZ dxfEnd   = dxfPoints[dxfPoints.Count - 1];
+            XYZ dxfVec   = dxfEnd - dxfStart;
+            double dxfLen = dxfVec.GetLength();
+
+            if (dxfLen < 1e-9) throw new InvalidOperationException("DXF start and end are identical.");
+
+            XYZ uDxf = dxfVec.Normalize();
+            XYZ vDxf = XYZ.BasisZ.CrossProduct(uDxf).Normalize();
+
+            XYZ revVec = originB - originA;
+            double revLen = revVec.GetLength();
+            if (revLen < 1e-9) throw new InvalidOperationException("Points A and B are at the same position.");
+
+            XYZ uRev = revVec.Normalize();
+            XYZ horizontalNormal = uRev.CrossProduct(XYZ.BasisZ);
+            XYZ vRev = horizontalNormal.GetLength() < 1e-9
+                ? XYZ.BasisX
+                : horizontalNormal.Normalize().CrossProduct(uRev).Normalize();
+
+            double scale       = revLen / dxfLen;
+            double deviateSign = mirror ? -1.0 : 1.0;
+
+            var transformed = new List<XYZ>();
+            foreach (XYZ pt in dxfPoints)
+            {
+                XYZ    local   = pt - dxfStart;
+                double along   = local.DotProduct(uDxf);
+                double deviate = local.DotProduct(vDxf);
+                transformed.Add(originA + (uRev * along * scale) + (vRev * deviate * deviateSign * scale));
+            }
+
+            transformed[transformed.Count - 1] = originB;
+            return transformed;
+        }
+
+        private static List<XYZ> ResampleTrajectory(List<XYZ> points, double interval = 0.3)
+        {
+            double totalLen = 0;
+            for (int i = 1; i < points.Count; i++)
+                totalLen += points[i].DistanceTo(points[i - 1]);
+
+            if (totalLen < interval * 2) return points;
+
+            var result = new List<XYZ> { points[0] };
+            double sinceLastSample = 0;
+
+            for (int i = 1; i < points.Count; i++)
+            {
+                double segLen = points[i].DistanceTo(points[i - 1]);
+                XYZ dir = (points[i] - points[i - 1]).Normalize();
+                double consumed = 0;
+
+                while (consumed < segLen)
+                {
+                    double remaining = interval - sinceLastSample;
+                    double available = segLen - consumed;
+
+                    if (available >= remaining)
+                    {
+                        result.Add(points[i - 1] + dir * (consumed + remaining));
+                        consumed += remaining;
+                        sinceLastSample = 0;
+                    }
+                    else
+                    {
+                        sinceLastSample += available;
+                        consumed = segLen;
+                    }
+                }
+            }
+
+            if (result[result.Count - 1].DistanceTo(points[points.Count - 1]) > 0.001)
+                result.Add(points[points.Count - 1]);
+
+            return result;
         }
     }
 }

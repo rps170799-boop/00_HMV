@@ -18,6 +18,8 @@ namespace HMVTools
         private readonly ExternalEvent                     _runEvent;
         private readonly MirrorFlexPipeRefresherHandler    _mirrorHandler;
         private readonly ExternalEvent                     _mirrorEvent;
+        private readonly RegenerateFlexPipeHandler         _regenHandler;
+        private readonly ExternalEvent                     _regenEvent;
 
         private List<ElementId>           _pointIds = new List<ElementId>();
         private ElectricalRefresherConfig  _config   = new ElectricalRefresherConfig();
@@ -26,7 +28,8 @@ namespace HMVTools
             UIApplication                   uiapp,
             ElectricalRefresherPickHandler  pickHandler,   ExternalEvent pickEvent,
             ElectricalRefresherHandler      runHandler,    ExternalEvent runEvent,
-            MirrorFlexPipeRefresherHandler  mirrorHandler, ExternalEvent mirrorEvent)
+            MirrorFlexPipeRefresherHandler  mirrorHandler, ExternalEvent mirrorEvent,
+            RegenerateFlexPipeHandler       regenHandler,  ExternalEvent regenEvent)
         {
             InitializeComponent();
 
@@ -37,10 +40,13 @@ namespace HMVTools
             _runEvent      = runEvent;
             _mirrorHandler = mirrorHandler;
             _mirrorEvent   = mirrorEvent;
+            _regenHandler  = regenHandler;
+            _regenEvent    = regenEvent;
 
             _pickHandler.UI   = this;
             _runHandler.UI    = this;
             _mirrorHandler.UI = this;
+            _regenHandler.UI  = this;
 
             this.Closed += (s, e) => ElectricalRefresherCommand.ClearWindow();
         }
@@ -221,6 +227,23 @@ namespace HMVTools
             _mirrorHandler.UI = this;
             this.Hide();
             _mirrorEvent.Raise();
+        }
+
+        private void BtnRegenerate_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(_config.DxfFolder))
+            {
+                SetStatus("Error: Open ⚙ Config and set the DXF folder first.");
+                return;
+            }
+
+            txtLog.Text = string.Empty;
+
+            _regenHandler.Config = _config;
+            _regenHandler.UI     = this;
+
+            this.Hide();
+            _regenEvent.Raise();
         }
 
         private void TopBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => this.DragMove();

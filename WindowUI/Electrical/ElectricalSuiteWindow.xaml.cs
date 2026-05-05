@@ -24,6 +24,8 @@ namespace HMVTools
         private ExternalEvent                      _refreshRunEvent;
         private MirrorFlexPipeRefresherHandler     _refreshMirrorHandler;
         private ExternalEvent                      _refreshMirrorEvent;
+        private RegenerateFlexPipeHandler          _refreshRegenHandler;
+        private ExternalEvent                      _refreshRegenEvent;
         private ElectricalRefresherWindow          _refreshWindow;
 
         private ElectricalGeometryHandler _geomHandler;
@@ -48,6 +50,8 @@ namespace HMVTools
             _refreshRunEvent     = ExternalEvent.Create(_refreshRunHandler);
             _refreshMirrorHandler = new MirrorFlexPipeRefresherHandler();
             _refreshMirrorEvent  = ExternalEvent.Create(_refreshMirrorHandler);
+            _refreshRegenHandler  = new RegenerateFlexPipeHandler();
+            _refreshRegenEvent   = ExternalEvent.Create(_refreshRegenHandler);
 
             // Geometry handler — must be created here in the valid Revit API context
             var geomDoc = uiapp.ActiveUIDocument.Document;
@@ -155,7 +159,8 @@ namespace HMVTools
                 _uiapp,
                 _refreshPickHandler,   _refreshPickEvent,
                 _refreshRunHandler,    _refreshRunEvent,
-                _refreshMirrorHandler, _refreshMirrorEvent);
+                _refreshMirrorHandler, _refreshMirrorEvent,
+                _refreshRegenHandler,  _refreshRegenEvent);
 
             var helper = new System.Windows.Interop.WindowInteropHelper(_refreshWindow);
             helper.Owner = new System.Windows.Interop.WindowInteropHelper(this).Handle;
