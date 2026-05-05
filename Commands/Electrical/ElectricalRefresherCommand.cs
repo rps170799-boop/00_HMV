@@ -319,13 +319,10 @@ namespace HMVTools
                 }
 
                 // Pre-parse DXF once — reused for every pair in this group
-                double groupDxfDx = 0;
-                double groupDxfDy = 0;
                 List<XYZ> groupRawPoints = null;
 
                 try
                 {
-                    ExtractDxfVectorSigned(dxfPath, out groupDxfDx, out groupDxfDy);
                     groupRawPoints = ParseDxfPoints(dxfPath);
                 }
                 catch (Exception ex)
@@ -347,36 +344,75 @@ namespace HMVTools
                     var ptA = pts[pair.iA];
                     var ptB = pts[pair.iB];
 
+                    // ── Deterministic A/B: smallest X wins (then Y, then Z) ──
+                    // Removes dependency on Revit's selection/sort order.
+                    const double sortTol = 0.01;
+                    bool swapAB = false;
+                    if (Math.Abs(ptA.pos.X - ptB.pos.X) > sortTol)
+                        swapAB = ptA.pos.X > ptB.pos.X;
+                    else if (Math.Abs(ptA.pos.Y - ptB.pos.Y) > sortTol)
+                        swapAB = ptA.pos.Y > ptB.pos.Y;
+                    else
+                        swapAB = ptA.pos.Z > ptB.pos.Z;
+
+                    if (swapAB)
+                    {
+                        var tmp = ptA; ptA = ptB; ptB = tmp;
+                    }
+
+                    UI?.Log($"  [{cnx}] ptA id:{ptA.id.IntegerValue} eq:'{ptA.equipoId}' pos:({ptA.pos.X:F2},{ptA.pos.Y:F2},{ptA.pos.Z:F2})" +
+                            (swapAB ? " (sorted)" : ""));
+                    UI?.Log($"  [{cnx}] ptB id:{ptB.id.IntegerValue} eq:'{ptB.equipoId}' pos:({ptB.pos.X:F2},{ptB.pos.Y:F2},{ptB.pos.Z:F2})");
+
                     try
                     {
-                        double ftToMm      = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
-                        double rvtDx       = (ptB.pos.X - ptA.pos.X) * ftToMm;
-                        double rvtDy       = (ptB.pos.Y - ptA.pos.Y) * ftToMm;
+                        double ftToMm  = UnitUtils.ConvertFromInternalUnits(1.0, UnitTypeId.Millimeters);
+                        double rvtDx   = (ptB.pos.X - ptA.pos.X) * ftToMm;
+                        double rvtDy   = (ptB.pos.Y - ptA.pos.Y) * ftToMm;
                         double rvtVano     = Math.Sqrt(rvtDx * rvtDx + rvtDy * rvtDy);
                         double rvtDesnivel = Math.Abs((ptB.pos.Z - ptA.pos.Z) * ftToMm);
 
                         UI?.Log($"  [{cnx}] RVT → vano: {rvtVano:F1} mm  |  desnivel: {rvtDesnivel:F1} mm");
-                        UI?.Log($"  [{cnx}] DXF → dx: {groupDxfDx:F1} mm  dy: {groupDxfDy:F1} mm");
 
-                        bool swapPoints = DetermineSwap(groupDxfDx, groupDxfDy, rvtDx, rvtDy);
+                        // ── Orientation via DXF vector dot product ──────────────
+                        XYZ pointA = ptA.pos;
+                        XYZ pointB = ptB.pos;
 
-                        var ptInicial = swapPoints ? ptB : ptA;
-                        var ptFinal   = swapPoints ? ptA : ptB;
+                        XYZ dxfStart = groupRawPoints[0];
+                        XYZ dxfEnd = groupRawPoints[groupRawPoints.Count - 1];
+                        XYZ dxfVec2D = new XYZ(dxfEnd.X - dxfStart.X, dxfEnd.Y - dxfStart.Y, 0);
+                        XYZ rvtVec2D = new XYZ(pointB.X - pointA.X, pointB.Y - pointA.Y, 0);
 
-                        XYZ pointA = ptInicial.pos;
-                        XYZ pointB = ptFinal.pos;
+                        double dot;
+                        bool reverseDxf;
 
-                        // Mirror is not auto-detected — use the 🔀 Mirror button on any wrong-side result.
-                        // When swapped, reverse DXF so its start always aligns with ptInicial.
-                        // This preserves asymmetric bulge position regardless of which point is A or B.
-                        List<XYZ> dxfPoints = swapPoints
+                        if (rvtDesnivel > rvtVano * 1.5)
+                        {
+                            // Desnivel-dominant: DXF Y = vertical, compare with Revit Z
+                            double rvtDz = (ptB.pos.Z - ptA.pos.Z);  // in feet, signed
+                            double dxfDy = dxfEnd.Y - dxfStart.Y;    // in feet, signed
+                            dot = dxfDy * rvtDz;
+                            reverseDxf = dot < 0;
+                            UI?.Log($"  [{cnx}] Desnivel-dominant → using DXF.Y({dxfDy:F2}) × RVT.Z({rvtDz:F2})");
+                        }
+                        else
+                        {
+                            // Vano-dominant: standard 2D XY dot product
+                            dot = dxfVec2D.DotProduct(rvtVec2D);
+                            reverseDxf = dot < 0;
+                        }
+
+                        UI?.Log($"  [{cnx}] DXF vec:({dxfVec2D.X:F2},{dxfVec2D.Y:F2}) RVT vec:({rvtVec2D.X:F2},{rvtVec2D.Y:F2}) dot:{dot:F2} → reverse={reverseDxf}");
+                        double dxfVanoMm     = Math.Abs(dxfEnd.X - dxfStart.X) * ftToMm;
+                        double dxfDesnivelMm = Math.Abs(dxfEnd.Y - dxfStart.Y) * ftToMm;
+                        UI?.Log($"  [{cnx}] DXF → vano: {dxfVanoMm:F1} mm  |  desnivel: {dxfDesnivelMm:F1} mm");
+
+                        List<XYZ> dxfPoints = reverseDxf
                             ? Enumerable.Reverse(groupRawPoints).ToList()
                             : groupRawPoints;
 
-                        // Mirror compensates for the lateral axis flip caused by swap.
-                        bool mirrorCurve = !swapPoints;
-
-                        List<XYZ> trajectory = CalculateTrajectory(dxfPoints, pointA, pointB, mirrorCurve);
+                       
+                        List<XYZ> trajectory = CalculateTrajectory(dxfPoints, pointA, pointB, false);
                         trajectory = ResampleTrajectory(trajectory, 0.5);
 
                         double minClearance = 0.5;
@@ -400,13 +436,8 @@ namespace HMVTools
                             trans.SetFailureHandlingOptions(fho);
 
                             FlexPipe flexPipe = FlexPipe.Create(
-                                doc,
-                                systemTypeId,
-                                flexType.Id,
-                                defaultLevel.Id,
-                                startTangent,
-                                endTangent,
-                                trajectory);
+                                doc, systemTypeId, flexType.Id, defaultLevel.Id,
+                                startTangent, endTangent, trajectory);
 
                             if (flexPipe == null)
                             {
@@ -416,10 +447,13 @@ namespace HMVTools
                                 continue;
                             }
 
+                            // Inicial/Final based on DXF vector decision
+                            var ptInicial = reverseDxf ? ptB : ptA;
+                            var ptFinal = reverseDxf ? ptA : ptB;
+
                             Parameter diamParam = flexPipe.get_Parameter(BuiltInParameter.RBS_PIPE_DIAMETER_PARAM);
-                            if (diamParam != null && !diamParam.IsReadOnly) { 
-                                diamParam.Set(UnitUtils.ConvertToInternalUnits(0.75,UnitTypeId.Inches));
-                            }
+                            if (diamParam != null && !diamParam.IsReadOnly)
+                                diamParam.Set(UnitUtils.ConvertToInternalUnits(0.75, UnitTypeId.Inches));
 
                             TrySetStringParam(flexPipe, Config.FlexCnxNumberParam,    cnx);
                             TrySetStringParam(flexPipe, Config.FlexEquipoInicialParam, StripEquipmentId(ptInicial.equipoId));
@@ -429,10 +463,10 @@ namespace HMVTools
                             SetConnectedFlag(ptFinal.fi,   Config.ConnectedParam);
 
                             trans.Commit();
-                        }
 
-                        UI?.Log($"  [{cnx}] ✔ Created — Inicial: {ptInicial.equipoId} → Final: {ptFinal.equipoId}" +
-                                (swapPoints ? " (swapped)" : ""));
+                            UI?.Log($"  [{cnx}] ✔ Created — Inicial: {ptInicial.equipoId} → Final: {ptFinal.equipoId}" +
+                                    (reverseDxf ? " (reversed)" : ""));
+                        }
                         created++;
                     }
                     catch (Exception ex)
@@ -448,79 +482,94 @@ namespace HMVTools
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        //  DXF HELPERS
+        //  AUTO-ORIENTATION — deviation profile fingerprint
         // ═══════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Extracts the signed DXF vector (no Math.Abs) from the first valid entity on layer "0".
-        /// dxfDx = X(end) - X(start), dxfDy = Y(end) - Y(start) — both in raw DXF units (mm).
+        /// Samples the UNSIGNED perpendicular deviation of a polyline from its chord
+        /// at uniform arc-length fractions. Unsigned so it's comparable across
+        /// different coordinate systems (DXF space vs Revit space).
         /// </summary>
-        private static void ExtractDxfVectorSigned(string filepath, out double dxfDx, out double dxfDy)
+        private static double[] ComputeDeviationProfileUnsigned(
+            IList<XYZ> polyline, XYZ chordStart, XYZ chordEnd, int sampleCount)
         {
-            dxfDx = 0;
-            dxfDy = 0;
+            XYZ    chordVec = chordEnd - chordStart;
+            double chordLen = chordVec.GetLength();
+            var    profile  = new double[sampleCount];
 
-            DxfFile dxf = DxfFile.Load(filepath);
-            var entities = dxf.Entities.Where(e => e.Layer == "0").ToList();
+            if (chordLen < 1e-9 || polyline.Count < 2) return profile;
 
-            foreach (var ent in entities)
+            XYZ uAB = chordVec.Normalize();
+
+            // Build cumulative arc-length table
+            var arcLen = new double[polyline.Count];
+            arcLen[0] = 0;
+            for (int i = 1; i < polyline.Count; i++)
+                arcLen[i] = arcLen[i - 1] + polyline[i].DistanceTo(polyline[i - 1]);
+
+            double totalArc = arcLen[polyline.Count - 1];
+            if (totalArc < 1e-9) return profile;
+
+            for (int s = 0; s < sampleCount; s++)
             {
-                if (ent is DxfPolyline poly && poly.Vertices.Count > 1)
-                {
-                    dxfDx = poly.Vertices.Last().Location.X - poly.Vertices.First().Location.X;
-                    dxfDy = poly.Vertices.Last().Location.Y - poly.Vertices.First().Location.Y;
-                    return;
-                }
-                if (ent is DxfLwPolyline lwPoly && lwPoly.Vertices.Count > 1)
-                {
-                    dxfDx = lwPoly.Vertices.Last().X - lwPoly.Vertices.First().X;
-                    dxfDy = lwPoly.Vertices.Last().Y - lwPoly.Vertices.First().Y;
-                    return;
-                }
-                if (ent is DxfLine line)
-                {
-                    dxfDx = line.P2.X - line.P1.X;
-                    dxfDy = line.P2.Y - line.P1.Y;
-                    return;
-                }
+                double targetArc = totalArc * (s + 1) / (sampleCount + 1);
+
+                // Find segment
+                int seg = 1;
+                while (seg < polyline.Count - 1 && arcLen[seg] < targetArc) seg++;
+
+                double segLen = arcLen[seg] - arcLen[seg - 1];
+                double segFrac = segLen > 1e-9
+                    ? (targetArc - arcLen[seg - 1]) / segLen
+                    : 0;
+
+                XYZ pt = polyline[seg - 1] + (polyline[seg] - polyline[seg - 1]) * segFrac;
+
+                // Unsigned perpendicular distance to chord
+                XYZ local     = pt - chordStart;
+                double along  = local.DotProduct(uAB);
+                XYZ projected = chordStart + uAB * along;
+                profile[s]    = pt.DistanceTo(projected);  // unsigned!
             }
+
+            return profile;
         }
 
         /// <summary>
-        /// Decides whether the Inicial/Final assignment should be swapped.
-        ///
-        /// Strategy:
-        ///   Primary axis = Vano (X). Vano must be positive in the Revit model.
-        ///   If the Revit X component is negative, swap so it becomes positive.
-        ///   If Revit X ≈ 0 (movement is mostly along Y / Desnivel axis), use the Y sign.
-        ///   The DXF vector direction confirms the intended orientation.
-        ///   When the dot product between DXF and the current Revit vector is negative the
-        ///   vectors point in opposite directions → swap.
+        /// Returns true if reversing the DXF point order would better match the Revit curve.
+        /// Sets <paramref name="isSymmetric"/> = true when forward and reverse scores are
+        /// within 1 % of each other (ambiguous — no auto-correction applied).
         /// </summary>
-        private static bool DetermineSwap(double dxfDx, double dxfDy, double rvtDx, double rvtDy)
+        private static bool CheckNeedsReverse(
+            double[] dxfProfile, double[] rvtProfile, out bool isSymmetric)
         {
-            const double threshold = 1e-3;
+            isSymmetric = false;
+            int n = Math.Min(dxfProfile.Length, rvtProfile.Length);
+            if (n == 0) return false;
 
-            // If DXF has no meaningful vector, fall back to ensuring Revit vano is positive
-            bool dxfHasX = Math.Abs(dxfDx) > threshold;
-            bool dxfHasY = Math.Abs(dxfDy) > threshold;
+            double forwardScore = 0;
+            double reverseScore = 0;
 
-            if (!dxfHasX && !dxfHasY)
+            for (int i = 0; i < n; i++)
             {
-                // No DXF reference — just make vano (X) positive in Revit
-                return rvtDx < -threshold;
+                forwardScore += dxfProfile[i] * rvtProfile[i];
+                reverseScore += dxfProfile[n - 1 - i] * rvtProfile[i];
             }
 
-            // Primary: use X if DXF has X component
-            if (dxfHasX)
+            double magnitude = Math.Max(Math.Abs(forwardScore), Math.Abs(reverseScore));
+            if (magnitude > 1e-9 &&
+                Math.Abs(forwardScore - reverseScore) / magnitude < 0.01)
             {
-                double dot = dxfDx * rvtDx + dxfDy * rvtDy;
-                return dot < 0;
+                isSymmetric = true;
+                return false;
             }
 
-            // Secondary: movement is purely on Y axis — use Y sign
-            return dxfDy * rvtDy < 0;
+            return reverseScore > forwardScore;
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        //  DXF HELPERS
+        // ═══════════════════════════════════════════════════════════════════
 
         // ── Full DXF point parsing — mirrors ElectricalConnectionCommand.ParseDxfPoints ──
 

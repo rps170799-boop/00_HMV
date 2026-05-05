@@ -201,11 +201,23 @@ namespace HMVTools
                         string vanoDiff       = row.dxfVano.HasValue     ? Math.Abs(row.dxfVano.Value     - row.rvtVano).ToString("F4", Inv)     : "";
                         string desnivelDiff   = row.dxfDesnivel.HasValue ? Math.Abs(row.dxfDesnivel.Value - row.rvtDesnivel).ToString("F4", Inv) : "";
 
+                        string cumple = "";
+                        if (row.dxfVano.HasValue && row.dxfDesnivel.HasValue)
+                        {
+                            bool vanoFail     = Math.Abs(row.dxfVano.Value     - row.rvtVano)     > 50.0;
+                            bool desnivelFail = Math.Abs(row.dxfDesnivel.Value - row.rvtDesnivel) > 50.0;
+
+                            if      (vanoFail && desnivelFail) cumple = "0.no cumple ni vano ni desnivel";
+                            else if (vanoFail)                 cumple = "1.vano no cumple";
+                            else if (desnivelFail)             cumple = "2.desnivel no cumple";
+                            else                               cumple = "cumple";
+                        }
+
                         csvLines.Add(string.Join(";",
                             row.paramValue, row.equipoInicial, row.equipoFinal,
                             dxfVanoStr, dxfDesnivelStr,
                             row.rvtVano.ToString("F4", Inv), row.rvtDesnivel.ToString("F4", Inv),
-                            vanoDiff, desnivelDiff));
+                            vanoDiff, desnivelDiff, cumple));
                     }
                     else
                     {
@@ -225,7 +237,7 @@ namespace HMVTools
                         csvLines.Add(string.Join(";",
                             "dxf_notfound_" + Path.GetFileNameWithoutExtension(kvp.Value),
                             "", "", rv.ToString("F4", Inv), rd.ToString("F4", Inv),
-                            "", "", "", ""));
+                            "", "", "", "", ""));
                     }
                 }
 
